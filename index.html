@@ -1,0 +1,250 @@
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>交通儀表板</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Axios -->
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+      font-size: 14px;
+    }
+
+    .leaflet-control {
+      z-index: 2000 !important;
+    }
+
+    .mouse-position {
+      background: rgba(255, 255, 255, 0.7);
+      padding: 5px;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <script>
+    // 🔑 換成你自己的 AppID 與 AppKey
+    const AppID = "f64114051-51c79fb9-4206-46dc";
+    const AppKey = "f20440d9-6d85-4aa5-ab13-5389cb2a6919";
+
+    let token = null;
+    let tokenExpireTime = 0;
+
+    // 取得或更新 Token
+    async function getToken() {
+      const now = Date.now();
+      if (token && now < tokenExpireTime) {
+        return token;
+      }
+      try {
+        const res = await axios.post(
+          "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token",
+          new URLSearchParams({
+            grant_type: "client_credentials",
+            client_id: AppID,
+            client_secret: AppKey
+          }),
+          { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+        );
+        token = res.data.access_token;
+        tokenExpireTime = now + (res.data.expires_in - 60) * 1000; // 提前 1 分鐘更新
+        return token;
+      } catch (err) {
+        console.error("❌ 取得 Token 失敗", err.response?.data || err);
+        return null;
+      }
+    }
+
+    // 初始化地圖，預設顯示整個台南市
+    const map = L.map("map").fitBounds([
+      [22.887, 120.007],
+      [23.413, 120.627]
+    ]);
+
+    // 底圖
+    const EMap = L.tileLayer('https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}', { attribution: '© 國土測繪中心' });
+    const orthophoto = L.tileLayer('https://wmts.nlsc.gov.tw/wmts/PHOTO2/default/GoogleMapsCompatible/{z}/{y}/{x}', { attribution: '© 國土測繪中心' });
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 });
+    const lightBasemap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap & © CARTO',
+      subdomains: 'abcd', maxZoom: 19
+    }).addTo(map);
+
+    const basemapLayers = {
+      "臺灣通用電子地圖": EMap,
+      "正射影像圖": orthophoto,
+      "OpenStreetMap": osm,
+      "簡潔底圖": lightBasemap
+    };
+
+    ////// 滑鼠位置顯示 ///////
+    var mousePositionControl = L.control({ position: 'bottomleft' });
+    mousePositionControl.onAdd = function (map) {
+      var div = L.DomUtil.create('div', 'mouse-position');
+      div.innerHTML = '經緯度: ';
+      return div;
+    };
+    mousePositionControl.addTo(map);
+
+    map.on('mousemove', function (e) {
+      var latlng = e.latlng;
+      document.querySelector('.mouse-position').innerHTML =
+        '經緯度：( ' + latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6) + ' )';
+    });
+
+    ////// 回到台南市 ///////
+    var infoControl = L.control({ position: 'bottomleft' });
+    infoControl.onAdd = function (map) {
+      var div = L.DomUtil.create('div', 'info-control');
+      div.innerHTML = '<b>點擊此處回到台南市</b>';
+      div.style.backgroundColor = 'rgba(255, 255, 255, 0.7)';
+      div.style.padding = '5px';
+      div.style.borderRadius = '5px';
+      div.style.fontSize = '16px';
+      div.style.fontWeight = 'bold';
+      div.style.cursor = 'pointer';
+      div.onclick = function () {
+        map.fitBounds([
+          [22.887, 120.007],
+          [23.413, 120.627]
+        ]);
+      };
+      return div;
+    };
+    infoControl.addTo(map);
+
+    /////////////////// 介接 TDX CCTV ///////////////////////
+    const cityCCTVLayer = L.layerGroup().addTo(map);
+    const highwayCCTVLayer = L.layerGroup();
+    const provinceCCTVLayer = L.layerGroup();
+
+    var cctvIcon = new L.Icon({ iconUrl: 'https://i.postimg.cc/wjz66NjK/CCTV.png', iconSize: [41, 41] });
+    var cctvIcon1 = new L.Icon({ iconUrl: 'https://i.postimg.cc/4y0yH2L2/CCTV.png', iconSize: [41, 41] });
+    var cctvIcon2 = new L.Icon({ iconUrl: 'https://i.postimg.cc/mgPPHCGP/CCTV.png', iconSize: [41, 41] });
+
+    // 台南市 CCTV
+    async function getCCTVData() {
+      const token = await getToken();
+      if (!token) return;
+
+      axios.get("https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/City/Tainan?$format=JSON", {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(res => {
+        (res.data.CCTVs || []).forEach(c => {
+          let imgTag = `<img src="${c.VideoStreamURL}" width="380" height="240"/>`;
+          L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon })
+            .bindPopup(`路名：${c.RoadName}</br>${imgTag}`, { maxWidth: "640", maxHeight: "480" })
+            .addTo(cityCCTVLayer);
+        });
+      }).catch(err => console.error("❌ 市區 CCTV 讀取失敗", err));
+    }
+
+    // 高速公路 CCTV（篩選台南市）
+    async function getCCTVData1() {
+      const token = await getToken();
+      if (!token) return;
+
+      let url1 = 'https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON';
+      axios.get(url1, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(async (res1) => {
+          let data1 = await res1.data;
+          console.log("🚦 Freeway API 回傳內容：", data1);
+
+          const cctvs = data1.CCTVs || data1.FreewayCCTVs || [];
+          console.log("高速公路 CCTV 原始數量：", cctvs.length);
+
+          const filtered = cctvs.filter(c =>
+            c.PositionLat >= 22.887 && c.PositionLat <= 23.413 &&
+            c.PositionLon >= 120.007 && c.PositionLon <= 120.627
+          );
+
+          console.log("台南市內的高速公路 CCTV 數量：", filtered.length);
+
+          filtered.forEach(c => {
+            let imgTag1 = `<img src="${c.VideoStreamURL}" width="380" height="240"/>`;
+            L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon1 })
+              .bindPopup(`路名：${c.RoadName}</br>${imgTag1}`, { maxWidth: "640", maxHeight: "480" })
+              .addTo(highwayCCTVLayer);
+          });
+        })
+        .catch((error1) => {
+          console.error("❌ 高速公路 CCTV 讀取失敗", error1);
+        });
+    }
+
+    // 省道 CCTV
+    async function getCCTVData2() {
+      const token = await getToken();
+      if (!token) return;
+
+      let url2 = 'https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Highway?$format=JSON';
+      axios.get(url2, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(async (res2) => {
+          let data2 = await res2.data;
+          console.log("🚦 Highway API 回傳內容：", data2);
+
+          const cctvs = data2.CCTVs || [];
+          console.log("省道 CCTV 原始數量：", cctvs.length);
+
+          // 篩選台南市範圍
+          const filtered = cctvs.filter(c =>
+            c.PositionLat >= 22.887 && c.PositionLat <= 23.413 &&
+            c.PositionLon >= 120.007 && c.PositionLon <= 120.627
+          );
+
+          console.log("台南市內的省道 CCTV 數量：", filtered.length);
+
+          filtered.forEach(c => {
+            let imgTag2 = `<img src="${c.VideoStreamURL}" width="380" height="240"/>`;
+            L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon2 })
+              .bindPopup(`路名：${c.RoadName}</br>${imgTag2}`, { maxWidth: "640", maxHeight: "480" })
+              .addTo(provinceCCTVLayer);
+          });
+
+          console.log("✅ provinceCCTVLayer 總數：", provinceCCTVLayer.getLayers().length);
+        })
+        .catch((error2) => {
+          console.error("❌ 省道 CCTV 讀取失敗", error2);
+        });
+    }
+
+
+    // 把 CCTV 圖層加到圖層控制器
+    const overlayLayers = {
+      "台南市 CCTV": cityCCTVLayer,
+      "高速公路 CCTV": highwayCCTVLayer,
+      "省道 CCTV": provinceCCTVLayer
+    };
+    L.control.layers(basemapLayers, overlayLayers, { position: 'topleft' }).addTo(map);
+
+    // 執行
+    getCCTVData();
+    getCCTVData1();
+    getCCTVData2();
+  </script>
+
+
+</body>
+
+</html>
