@@ -1,0 +1,125 @@
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>交通儀表板</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <style>
+    body { margin: 0; padding: 0; }
+    #map { height: 100%; width: 100%; font-size: 14px; }
+    .leaflet-control { z-index: 2000 !important; }
+    .mouse-position {
+      background: rgba(255, 255, 255, 0.7);
+      padding: 5px;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+  </style>
+  
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <script>
+    // 初始化地圖，預設顯示整個台南市
+    const map = L.map("map").fitBounds([
+      [22.887, 120.007], // 西南角
+      [23.413, 120.627]  // 東北角
+    ]);
+
+    // 台灣 NLCS 瓦片圖
+    const EMap = L.tileLayer('https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}', {
+      attribution: '© 國土測繪中心'
+    });
+
+    const orthophoto = L.tileLayer('https://wmts.nlsc.gov.tw/wmts/PHOTO2/default/GoogleMapsCompatible/{z}/{y}/{x}', {
+      attribution: '© 國土測繪中心'
+    });
+
+    // OpenStreetMap
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19
+    });
+
+	// 簡單乾淨的底圖 (Carto Light)
+	const lightBasemap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+		attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+		subdomains: 'abcd',
+		maxZoom: 19
+	});
+
+
+    const basemapLayers = {
+      "臺灣通用電子地圖": EMap,
+      "正射影像圖": orthophoto,
+      "OpenStreetMap": osm,
+	  "簡潔底圖": lightBasemap.addTo(map)
+    };
+
+    // 底圖切換
+    L.control.layers(basemapLayers, null, { position: 'topleft' }).addTo(map);
+
+    //////// 滑鼠位置顯示經緯度 ////////
+    var mousePositionControl = L.control({ position: 'bottomleft' });
+    mousePositionControl.onAdd = function (map) {
+      var div = L.DomUtil.create('div', 'mouse-position');
+      div.innerHTML = '經緯度: ';
+      return div;
+    };
+    mousePositionControl.addTo(map);
+
+    map.on('mousemove', function (e) {
+      var latlng = e.latlng;
+      document.querySelector('.mouse-position').innerHTML =
+        '經緯度：( ' + latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6) + ' )';
+    });
+
+    //////// 回到台南市 ////////
+    var infoControl = L.control({ position: 'bottomleft' });
+    infoControl.onAdd = function (map) {
+      var div = L.DomUtil.create('div', 'info-control');
+      div.innerHTML = '<b>點擊此處回到台南市</b>';
+      div.style.backgroundColor = 'rgba(255, 255, 255, 0.7)';
+      div.style.padding = '5px';
+      div.style.borderRadius = '5px';
+      div.style.fontSize = '16px';
+      div.style.fontWeight = 'bold';
+      div.style.cursor = 'pointer';
+      div.onclick = function () {
+        map.fitBounds([
+          [22.887, 120.007], // 西南角
+          [23.413, 120.627]  // 東北角
+        ]);
+      };
+      return div;
+    };
+    infoControl.addTo(map);
+
+    //////// 台南市各區界線 ////////
+    fetch('tn-town.geojson')
+      .then(response => response.json())
+      .then(data => {
+        const tainanDistricts = L.geoJSON(data, {
+          style: {
+            color: "#000000",    // 黑色邊線
+            weight: 2,
+            opacity: 0.7,        // 邊線透明度
+            fill: false          // 填充透明度
+          },
+          onEachFeature: function (feature, layer) {
+            if (feature.properties && feature.properties.TOWNNAME) {
+              layer.bindPopup(feature.properties.TOWNNAME);
+            }
+          }
+        }).addTo(map);
+      })
+      .catch(err => console.error(err));
+  </script>
+</body>
+</html>
