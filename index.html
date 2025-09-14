@@ -33,6 +33,51 @@
       border-radius: 5px;
       font-size: 14px;
     }
+
+
+    .legend {
+      background: rgba(255, 255, 255, .9);
+      padding: 8px 10px;
+      border-radius: 8px;
+      line-height: 18px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .15);
+      font-size: 13px;
+    }
+
+    .legend .item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0;
+    }
+
+    .legend img {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
+
+    .legend .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #d9534f;
+      border: 2px solid #fff;
+      box-shadow: 0 0 4px rgba(0, 0, 0, .4);
+    }
+
+    .legend .title {
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .custom-title {
+      background: #f8f9fa;
+      padding: 4px 8px;
+      font-weight: bold;
+      border-bottom: 1px solid #ccc;
+      cursor: pointer;
+    }
   </style>
 </head>
 
@@ -40,6 +85,7 @@
   <div id="map"></div>
 
   <script>
+    // #region token&API
     // 🔑 換成你自己的 AppID 與 AppKey
     const AppID = "f64114051-51c79fb9-4206-46dc";
     const AppKey = "f20440d9-6d85-4aa5-ab13-5389cb2a6919";
@@ -71,14 +117,16 @@
         return null;
       }
     }
+    // #endregion
 
-    // 初始化地圖，預設顯示整個台南市
+    // #region 初始化地圖，預設顯示整個台南市
     const map = L.map("map").fitBounds([
-      [22.887, 120.007],
-      [23.413, 120.627]
+      [22.90, 120.10],
+      [23.30, 120.55]
     ]);
+    // #endregion
 
-    // 底圖
+    // #region 底圖
     const EMap = L.tileLayer('https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}', { attribution: '© 國土測繪中心' });
     const orthophoto = L.tileLayer('https://wmts.nlsc.gov.tw/wmts/PHOTO2/default/GoogleMapsCompatible/{z}/{y}/{x}', { attribution: '© 國土測繪中心' });
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 });
@@ -93,8 +141,9 @@
       "OpenStreetMap": osm,
       "簡潔底圖": lightBasemap
     };
-
-    ////// 滑鼠位置顯示 ///////
+    // #endregion
+    
+    // #region////// 滑鼠位置顯示 /////////////
     var mousePositionControl = L.control({ position: 'bottomleft' });
     mousePositionControl.onAdd = function (map) {
       var div = L.DomUtil.create('div', 'mouse-position');
@@ -108,8 +157,9 @@
       document.querySelector('.mouse-position').innerHTML =
         '經緯度：( ' + latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6) + ' )';
     });
+    // #endregion
 
-    ////// 回到台南市 ///////
+    // #region////// 回到台南市鈕 /////////////
     var infoControl = L.control({ position: 'bottomleft' });
     infoControl.onAdd = function (map) {
       var div = L.DomUtil.create('div', 'info-control');
@@ -122,22 +172,74 @@
       div.style.cursor = 'pointer';
       div.onclick = function () {
         map.fitBounds([
-          [22.887, 120.007],
-          [23.413, 120.627]
+          [22.90, 120.10],
+          [23.30, 120.55]
         ]);
       };
       return div;
     };
     infoControl.addTo(map);
+    // #endregion
 
-    /////////////////// 介接 TDX CCTV ///////////////////////
-    const cityCCTVLayer = L.layerGroup().addTo(map);
-    const highwayCCTVLayer = L.layerGroup();
-    const provinceCCTVLayer = L.layerGroup();
+    // #region////// 台南市區界圖層 ///////////
+    const districtLayer = L.layerGroup();
 
-    var cctvIcon = new L.Icon({ iconUrl: 'https://i.postimg.cc/wjz66NjK/CCTV.png', iconSize: [41, 41] });
-    var cctvIcon1 = new L.Icon({ iconUrl: 'https://i.postimg.cc/4y0yH2L2/CCTV.png', iconSize: [41, 41] });
-    var cctvIcon2 = new L.Icon({ iconUrl: 'https://i.postimg.cc/mgPPHCGP/CCTV.png', iconSize: [41, 41] });
+    fetch("tn-town.geojson")
+      .then(res => res.json())
+      .then(data => {
+        L.geoJSON(data, {
+          style: function (feature) {
+            // 判斷屬性，外框 vs 區界
+            // 假設 TOWNNAME = "台南市" 代表大外框，其餘是區界
+            if (feature.properties.TOWNNAME === "台南市") {
+              return {
+                color: "#000000",   // 黑色
+                weight: 2,          // 線條粗
+                opacity: 1,
+                fillOpacity: 0,     // 不要填滿
+                dashArray: null     // 實線
+              };
+            } else {
+              return {
+                color: "#000000",   // 黑色
+                weight: 0.7,
+                opacity: 0.8,
+                fillOpacity: 0,
+                dashArray: "5, 5"   // 虛線 (5px 線段, 5px 間隔)
+              };
+            }
+          },
+          onEachFeature: function (feature, layer) {
+            if (feature.properties) {
+              layer.bindPopup("行政區：" + (feature.properties.TOWNNAME || "未知"));
+            }
+          }
+        }).addTo(districtLayer);
+
+        districtLayer.addTo(map); // 預設顯示
+        console.log("✅ 台南市區界載入完成");
+      })
+      .catch(err => console.error("❌ 載入區界失敗", err));
+      // #endregion
+
+
+    // #region///////// CCTV /////////////////
+    // CCTV 圖層（預設都不加到地圖）
+    const cityCCTVLayer = L.layerGroup();      // 台南市
+    const highwayCCTVLayer = L.layerGroup();   // 國道/高速
+    const provinceCCTVLayer = L.layerGroup();  // 省道
+
+    // CCTV 總開關：把三個子圖層納入一個 LayerGroup
+    const allCCTV = L.layerGroup([
+      cityCCTVLayer,
+      highwayCCTVLayer,
+      provinceCCTVLayer
+    ]);
+
+    // icon
+    var cctvIcon = new L.Icon({ iconUrl: 'https://i.postimg.cc/XvSCdW0M/CCTV.png', iconSize: [30, 30] }); // 市區
+    var cctvIcon1 = new L.Icon({ iconUrl: 'https://i.postimg.cc/4y0yH2L2/CCTV.png', iconSize: [30, 30] });                       // 高速
+    var cctvIcon2 = new L.Icon({ iconUrl: 'https://i.postimg.cc/mgPPHCGP/CCTV.png', iconSize: [30, 30] });                       // 省道
 
     // 台南市 CCTV
     async function getCCTVData() {
@@ -173,8 +275,8 @@
           console.log("高速公路 CCTV 原始數量：", cctvs.length);
 
           const filtered = cctvs.filter(c =>
-            c.PositionLat >= 22.887 && c.PositionLat <= 23.413 &&
-            c.PositionLon >= 120.007 && c.PositionLon <= 120.627
+            c.PositionLat >= 22.90 && c.PositionLat <= 23.30 &&
+            c.PositionLon >= 120.10 && c.PositionLon <= 120.55
           );
 
           console.log("台南市內的高速公路 CCTV 數量：", filtered.length);
@@ -209,8 +311,8 @@
 
           // 篩選台南市範圍
           const filtered = cctvs.filter(c =>
-            c.PositionLat >= 22.887 && c.PositionLat <= 23.413 &&
-            c.PositionLon >= 120.007 && c.PositionLon <= 120.627
+            c.PositionLat >= 22.90 && c.PositionLat <= 23.30 &&
+            c.PositionLon >= 120.30 && c.PositionLon <= 120.55
           );
 
           console.log("台南市內的省道 CCTV 數量：", filtered.length);
@@ -228,20 +330,204 @@
           console.error("❌ 省道 CCTV 讀取失敗", error2);
         });
     }
+    // #endregion
 
 
-    // 把 CCTV 圖層加到圖層控制器
-    const overlayLayers = {
-      "台南市 CCTV": cityCCTVLayer,
-      "高速公路 CCTV": highwayCCTVLayer,
-      "省道 CCTV": provinceCCTVLayer
-    };
-    L.control.layers(basemapLayers, overlayLayers, { position: 'topleft' }).addTo(map);
+    // #region////// 即時道路事件 /////////////
+    // 建立三個子圖層
+    const cityEventsLayer = L.layerGroup();
+    const freewayEventsLayer = L.layerGroup();
+    const highwayEventsLayer = L.layerGroup();
+
+    // 合併成一個總圖層
+    const allEventsLayer = L.layerGroup([
+      cityEventsLayer,
+      freewayEventsLayer,
+      highwayEventsLayer
+    ]);
+
+    // WKT 解析
+    function parseWKTPoint(wkt) {
+      if (!wkt || !wkt.startsWith("POINT")) return null;
+      const nums = wkt.replace(/POINT\s*\(|\)/g, "").trim().split(/\s+/).map(Number);
+      if (nums.length !== 2 || nums.some(isNaN)) return null;
+      const [lon, lat] = nums;
+      return [lat, lon]; // Leaflet 格式
+    }
+
+    // 限制範圍 (台南市大概範圍)
+    function isInTainan(lat, lon) {
+      return lat >= 22.887 && lat <= 23.413 &&
+        lon >= 120.007 && lon <= 120.627;
+    }
+
+    // 選 icon
+    function getEventIcon(desc) {
+      let url;
+      if (desc && desc.includes("車禍")) {
+        url = "https://i.postimg.cc/KvcjXzmv/image.png";
+      } else if (desc && desc.includes("施工")) {
+        url = "https://i.postimg.cc/fTHLMNb7/image.png";
+      } else if (desc && desc.includes("災害")) {
+        url = "https://i.postimg.cc/0NS2GK0Z/image.png";
+      }
+      if (url) {
+        return L.icon({ iconUrl: url, iconSize: [32, 32], iconAnchor: [16, 16], popupAnchor: [0, -16] });
+      } else {
+        return L.divIcon({
+          className: 'live-event-icon',
+          html: '<div style="width:14px;height:14px;border-radius:50%;background:#d9534f;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.4)"></div>',
+          iconSize: [14, 14], iconAnchor: [7, 7]
+        });
+      }
+    }
+
+    // 共用的事件載入 function
+    async function loadEvents(url, targetLayer) {
+      const token = await getToken();
+      if (!token) return;
+
+      try {
+        const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+        targetLayer.clearLayers();
+
+        const events = data?.LiveEvents || [];
+        events.forEach(ev => {
+          const latlng = parseWKTPoint(ev.Positions);
+          if (!latlng) return;
+          if (!isInTainan(latlng[0], latlng[1])) return; // 限制台南範圍
+
+          const popupHtml = `
+        <div style="min-width:220px">
+          <div style="font-weight:700;margin-bottom:4px">${ev.EventTitle || "道路事件"}</div>
+          ${ev.Description ? `<div>內容：${ev.Description}</div>` : ""}
+          ${ev?.Location?.Other ? `<div>地點：${ev.Location.Other}</div>` : ""}
+          ${ev.Source ? `<div>來源：${ev.Source}</div>` : ""}
+        </div>
+      `;
+          L.marker(latlng, { icon: getEventIcon(ev.Description) })
+            .bindPopup(popupHtml)
+            .addTo(targetLayer);
+        });
+
+        // 設定自動刷新
+        const intervalSec = Number(data?.UpdateInterval) || 60;
+        setTimeout(() => loadEvents(url, targetLayer), intervalSec * 1000);
+
+      } catch (err) {
+        console.error("❌ 道路事件讀取失敗", url, err);
+        setTimeout(() => loadEvents(url, targetLayer), 60000);
+      }
+    }
+
+    // 啟動三個來源
+    function loadAllEvents() {
+      loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/City/Tainan?$format=JSON", cityEventsLayer);
+      loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Freeway?$format=JSON", freewayEventsLayer);
+      loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Highway?$format=JSON", highwayEventsLayer);
+    }
+    // #endregion
+
+
+
+
+
+
+
+
+
+    // #region/////////圖層控制器//////////////
+    // === 底圖控制器 ===
+    L.control.layers(basemapLayers, null, { position: 'topleft', collapsed: false }).addTo(map);
+
+    // === CCTV 控制器（行人專用）===
+    const cctvControl = L.control.layers(null, { "CCTV": allCCTV }, { position: 'topleft', collapsed: true });
+    cctvControl.addTo(map);
+
+    // === 道路事件控制器（駕駛人專用）===
+    const eventControl = L.control.layers(null, { "即時道路事件": allEventsLayer }, { position: 'topleft', collapsed: true });
+    eventControl.addTo(map);
+
+    // === 修改標題 ===
+    setTimeout(() => {
+      // 找到 Leaflet 控制器的 DOM
+      const controls = document.querySelectorAll('.leaflet-control-layers');
+      if (controls.length >= 3) {
+        controls[1].querySelector('.leaflet-control-layers-toggle').title = "行人專用";
+        controls[1].insertAdjacentHTML("afterbegin", "<div class='custom-title'>行人專用</div>");
+
+        controls[2].querySelector('.leaflet-control-layers-toggle').title = "駕駛人專用";
+        controls[2].insertAdjacentHTML("afterbegin", "<div class='custom-title'>駕駛人專用</div>");
+      }
+    }, 100);
 
     // 執行
     getCCTVData();
     getCCTVData1();
     getCCTVData2();
+    loadAllEvents();
+    // #endregion
+
+
+    // #region///////// 圖例 /////////////////
+    // CCTV 圖例（市區/高速/省道）
+    const cctvLegend = L.control({ position: 'bottomright' });
+    cctvLegend.onAdd = function () {
+      const div = L.DomUtil.create('div', 'legend');
+      div.innerHTML = `
+    <div class="title">CCTV 圖例</div>
+    <div class="item"><img src="https://i.postimg.cc/XvSCdW0M/CCTV.png" alt="市區 CCTV"> <span>市區 CCTV</span></div>
+    <div class="item"><img src="https://i.postimg.cc/4y0yH2L2/CCTV.png" alt="國道/高速 CCTV"> <span>國道/高速 CCTV</span></div>
+    <div class="item"><img src="https://i.postimg.cc/mgPPHCGP/CCTV.png" alt="省道 CCTV"> <span>省道 CCTV</span></div>
+  `;
+      return div;
+    };
+
+    // 只在「CCTV（全部）」打開時顯示圖例
+    map.on("overlayadd", function (e) {
+      if (e.name === "CCTV") {
+        cctvLegend.addTo(map);
+      }
+    });
+    map.on("overlayremove", function (e) {
+      if (e.name === "CCTV") {
+        map.removeControl(cctvLegend);
+      }
+    });
+
+
+    // 即時道路事件圖例
+    // 建立圖例（但先不要加到 map）
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function () {
+      const div = L.DomUtil.create('div', 'legend');
+      div.innerHTML = `
+    <div class="title">事件圖例</div>
+    <div class="item"><img src="https://i.postimg.cc/KvcjXzmv/image.png" alt="車禍"> <span>車禍</span></div>
+    <div class="item"><img src="https://i.postimg.cc/fTHLMNb7/image.png" alt="施工"> <span>施工</span></div>
+    <div class="item"><img src="https://i.postimg.cc/0NS2GK0Z/image.png" alt="災害"> <span>災害</span></div>
+    <div class="item"><span class="dot"></span> <span>其他事件</span></div>
+  `;
+      return div;
+    };
+
+    // 當使用者「打開」即時道路事件圖層 → 顯示圖例
+    map.on("overlayadd", function (e) {
+      if (e.name === "即時道路事件") {
+        legend.addTo(map);
+      }
+    });
+
+    // 當使用者「關閉」即時道路事件圖層 → 移除圖例
+    map.on("overlayremove", function (e) {
+      if (e.name === "即時道路事件") {
+        map.removeControl(legend);
+      }
+    });
+    // #endregion
+
+
+
   </script>
 
 
