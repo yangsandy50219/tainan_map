@@ -21,13 +21,14 @@
 
 
   <style>
+    html,
     body {
       margin: 0;
       padding: 0;
     }
 
     #map {
-      height: 100%;
+      height: 100vh;
       width: 100%;
       font-size: 14px;
     }
@@ -103,36 +104,44 @@
     const AppID2 = "f64114051-924181ba-6a4d-4890";
     const AppKey2 = "043fcebb-22e0-4b48-a45a-79e5fdbe2b9f";
 
+    // 第三組 (專門給 停車用)
+    const AppID3 = "f64114051-3e23d930-5b9e-4bf7";
+    const AppKey3 = "a8a9e747-baa1-450b-8aaa-1504a9d11ecb";
+
+    // 三組 token 與過期時間
     let token1 = null, tokenExpireTime1 = 0;
     let token2 = null, tokenExpireTime2 = 0;
+    let token3 = null, tokenExpireTime3 = 0;
 
     // 共用的 getToken，依來源選哪組
     async function getToken(which = 1) {
       const now = Date.now();
 
+      // 判斷三組 token 是否過期
       if (which === 1 && token1 && now < tokenExpireTime1) return token1;
       if (which === 2 && token2 && now < tokenExpireTime2) return token2;
+      if (which === 3 && token3 && now < tokenExpireTime3) return token3;
 
       try {
-        const res = await axios.post(
+        const { data } = await axios.post(
           "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token",
           new URLSearchParams({
             grant_type: "client_credentials",
-            client_id: which === 1 ? AppID1 : AppID2,
-            client_secret: which === 1 ? AppKey1 : AppKey2
+            client_id: which === 1 ? AppID1 : (which === 2 ? AppID2 : AppID3),
+            client_secret: which === 1 ? AppKey1 : (which === 2 ? AppKey2 : AppKey3)
           }),
           { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
         );
 
-        const tk = res.data.access_token;
-        const exp = now + (res.data.expires_in - 60) * 1000;
+        const tk = data.access_token;
+        const exp = now + (data.expires_in - 60) * 1000; // 提前 1 分鐘刷新
 
         if (which === 1) {
-          token1 = tk;
-          tokenExpireTime1 = exp;
+          token1 = tk; tokenExpireTime1 = exp;
+        } else if (which === 2) {
+          token2 = tk; tokenExpireTime2 = exp;
         } else {
-          token2 = tk;
-          tokenExpireTime2 = exp;
+          token3 = tk; tokenExpireTime3 = exp;
         }
 
         return tk;
@@ -141,8 +150,8 @@
         return null;
       }
     }
-
     // #endregion
+
 
     // #region 初始化地圖，預設顯示整個台南市
     const map = L.map("map").fitBounds([
@@ -621,8 +630,8 @@
       `);
         });
 
-        // 每 90 秒更新一次
-        setTimeout(updateYoubikeAvailability, 90000);
+        // 每 120 秒更新一次
+        setTimeout(updateYoubikeAvailability, 120000);
 
       } catch (err) {
         console.error("❌ YouBike 車位更新失敗", err);
@@ -647,12 +656,12 @@
 
     // (5) 圖層開關時才顯示圖例
     map.on("overlayadd", function (e) {
-      if (e.name === "自行車") {
+      if (e.name === "公共自行車資訊") {
         bikeLegend.addTo(map);
       }
     });
     map.on("overlayremove", function (e) {
-      if (e.name === "自行車") {
+      if (e.name === "公共自行車資訊") {
         map.removeControl(bikeLegend);
       }
     });
@@ -695,7 +704,11 @@
 
     // (2) 公車站位 (用 /Bus/Station)
     const busStopLayer = L.layerGroup();
-    const busStopCluster = L.markerClusterGroup();
+    const busStopCluster = L.markerClusterGroup({
+      disableClusteringAtZoom: 17,  // 📍 放大到 15 級以上時自動拆開
+      spiderfyOnMaxZoom: true,      // 📍 點擊群集時展開顯示個別點
+      showCoverageOnHover: true    // 📍 移到群集上不顯示藍色覆蓋範圍
+    });
     busStopLayer.addLayer(busStopCluster);
 
     async function loadBusStations() {
@@ -847,6 +860,169 @@
     // #endregion
 
 
+    // #region /////// 停車位 ///////////
+    // 停車點位群集
+    const parkingLayer = L.layerGroup();
+    const parkingCluster = L.markerClusterGroup({
+      maxClusterRadius: 40,         // 📍 群集半徑，數值越小 → 群集變多
+      disableClusteringAtZoom: 17,  // 📍 放大到 15 級以上時自動拆開
+      spiderfyOnMaxZoom: true,      // 📍 點擊群集時展開顯示個別點
+      showCoverageOnHover: true    // 📍 移到群集上不顯示藍色覆蓋範圍
+    });
+    parkingLayer.addLayer(parkingCluster);
+
+    // 停車場 icon
+    const parkingIcon = L.icon({
+      iconUrl: "https://i.postimg.cc/hP94LZRY/parking.png", // 自訂停車圖示
+      iconSize: [35, 35],
+      iconAnchor: [17, 35],
+      popupAnchor: [0, -35]
+    });
+
+    // 1️⃣ 場內停車場 (基本資料 + 即時剩餘位)
+    async function loadOffStreetParking() {
+      const token = await getToken(3); // 第三組 API
+      if (!token) return;
+
+      const urlBase =
+        "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/CarPark/City/Tainan?$format=JSON";
+      const urlAvail =
+        "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/ParkingAvailability/City/Tainan?$format=JSON";
+
+      try {
+        const [resBase, resAvail] = await Promise.all([
+          axios.get(urlBase, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(urlAvail, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+
+        const base = resBase.data?.CarParks || [];
+        const avail = resAvail.data?.ParkingAvailabilities || [];
+
+        console.log("🏢 場內停車場基本數量：", base.length);
+        console.log("🏢 場內停車場即時數量：", avail.length);
+
+        base.forEach((park) => {
+          const lat = park.CarParkPosition?.PositionLat;
+          const lon = park.CarParkPosition?.PositionLon;
+          if (!lat || !lon) return;
+
+          // 強制字串比對 ID
+          const match = avail.find(
+            (a) => String(a.CarParkID) === String(park.CarParkID)
+          );
+
+          const name = park.CarParkName?.Zh_tw || "未知停車場";
+          const total = match?.TotalSpaces ?? "未知";
+          const available = match?.AvailableSpaces ?? "未知";
+          const update = match?.DataCollectTime || match?.UpdateTime || "無";
+
+          const html = `
+        <b>${name}</b><br/>
+        總車位數：${total}<br/>
+        剩餘車位數：${available}<br/>
+        更新時間：${new Date(update).toLocaleString()}
+      `;
+
+          L.marker([lat, lon], { icon: parkingIcon })
+            .bindPopup(html)
+            .addTo(parkingCluster);
+        });
+
+        console.log("✅ 場內停車場載入完成");
+      } catch (err) {
+        console.error("❌ 場內停車場讀取失敗", err);
+      }
+    }
+
+    // 2️⃣ 路邊停車場 (基本資料 + 總格數 + 即時剩餘位)
+    async function loadOnStreetParking() {
+      const token = await getToken(3);
+      if (!token) return;
+
+      const urlBase =
+        "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegment/City/Tainan?$format=JSON";
+      const urlSpace =
+        "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegmentSpace/City/Tainan?$format=JSON";
+      const urlAvail =
+        "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegmentAvailability/City/Tainan?$format=JSON";
+
+      try {
+        const [resBase, resSpace, resAvail] = await Promise.all([
+          axios.get(urlBase, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(urlSpace, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(urlAvail, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+
+        const base = resBase.data?.ParkingSegments || [];
+        const spaces = resSpace.data?.CrubSegmentParkingSpaces || [];
+        const avails = resAvail.data?.ParkingSegmentAvailabilities || [];
+
+        console.log("🛣 路邊停車段基本數量：", base.length);
+        console.log("🛣 路邊停車段格數數量：", spaces.length);
+        console.log("🛣 路邊停車段即時數量：", avails.length);
+
+        base.forEach((seg) => {
+          const lat = seg.ParkingSegmentPosition?.PositionLat;
+          const lon = seg.ParkingSegmentPosition?.PositionLon;
+          if (!lat || !lon) return;
+
+          const matchSpace = spaces.find(
+            (s) => String(s.ParkingSegmentID) === String(seg.ParkingSegmentID)
+          );
+          const matchAvail = avails.find(
+            (a) => String(a.ParkingSegmentID) === String(seg.ParkingSegmentID)
+          );
+
+          const name = seg.ParkingSegmentName?.Zh_tw || "未知路段";
+          const total = matchSpace?.TotalSpaces ?? "未知";
+          const available = matchAvail?.AvailableSpaces ?? "未知";
+          const update = matchAvail?.UpdateTime || "無";
+
+          const html = `
+        <b>${name}</b><br/>
+        總車位數：${total}<br/>
+        剩餘車位數：${available}<br/>
+        更新時間：${new Date(update).toLocaleString()}
+      `;
+
+          L.marker([lat, lon], { icon: parkingIcon })
+            .bindPopup(html)
+            .addTo(parkingCluster);
+        });
+
+        console.log("✅ 路邊停車載入完成");
+      } catch (err) {
+        console.error("❌ 路邊停車位讀取失敗", err);
+      }
+    }
+
+
+
+    // 3️⃣ 停車圖例
+    const parkingLegend = L.control({ position: "bottomright" });
+    parkingLegend.onAdd = function () {
+      const div = L.DomUtil.create("div", "legend");
+      div.innerHTML = `
+    <div class="title">停車場</div>
+    <div class="item"><img src="https://i.postimg.cc/hP94LZRY/parking.png" width="20"/> 停車位</div>
+  `;
+      return div;
+    };
+    map.on("overlayadd", function (e) {
+      if (e.name === "停車資訊") {
+        parkingLegend.addTo(map);
+      }
+    });
+    map.on("overlayremove", function (e) {
+      if (e.name === "停車資訊") {
+        map.removeControl(parkingLegend);
+      }
+    });
+
+    // 4️⃣ 合併成總圖層
+    const allParkingLayer = L.layerGroup([parkingLayer]);
+
+    // #endregion
 
 
 
@@ -863,7 +1039,7 @@
       const controls = document.querySelectorAll('.leaflet-control-layers');
       if (controls.length > 0) {
         const baseCtrl = controls[0]; // 第一個通常就是底圖控制器
-        
+
         // 加上自訂標題
         baseCtrl.insertAdjacentHTML("afterbegin", "<div class='custom-title'>底圖</div>");
       }
@@ -884,7 +1060,8 @@
     const eventControl = L.control.layers(null,
       {
         "CCTV": allCCTV,
-        "即時道路事件": allEventsLayer
+        "即時道路事件": allEventsLayer,
+        "停車資訊": allParkingLayer
 
       }, { position: 'topleft', collapsed: true });
     eventControl.addTo(map);
@@ -937,7 +1114,9 @@
     loadBusRoutes();
     loadBusStations();
     loadBusRealtime();
-
+    // 停車位
+    loadOffStreetParking();
+    loadOnStreetParking();
 
 
     // 即時資訊(延遲&定時更新)
