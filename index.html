@@ -168,7 +168,7 @@
     };
     // #endregion
 
-    // #region////// 滑鼠位置顯示 /////////////
+    // #region////// 滑鼠位置顯示座標 /////////////
     var mousePositionControl = L.control({ position: 'bottomleft' });
     mousePositionControl.onAdd = function (map) {
       var div = L.DomUtil.create('div', 'mouse-position');
@@ -852,17 +852,33 @@
 
 
     // #region/////////圖層控制器//////////////
-    // ============= 底圖控制器 ============
-    L.control.layers(basemapLayers, null, { position: 'topleft', collapsed: false }).addTo(map);
+    // 底圖控制器
+    const basemapControl = L.control.layers(basemapLayers, null, {
+      position: 'topleft',
+      collapsed: true   // ✅ 預設收合
+    }).addTo(map);
+
+    // === 自訂標題 ===
+    setTimeout(() => {
+      const controls = document.querySelectorAll('.leaflet-control-layers');
+      if (controls.length > 0) {
+        const baseCtrl = controls[0]; // 第一個通常就是底圖控制器
+        
+        // 加上自訂標題
+        baseCtrl.insertAdjacentHTML("afterbegin", "<div class='custom-title'>底圖</div>");
+      }
+    }, 100);
+
 
     // ============= 行人專用 ============
     const cctvControl = L.control.layers(null,
       {
-        "自行車": allBikeLayer,
+        "公共自行車資訊": allBikeLayer,
         "公車資訊": busInfoLayer
       },
       { position: 'topleft', collapsed: true });
     cctvControl.addTo(map);
+
 
     // ============= 駕駛人專用 =============
     const eventControl = L.control.layers(null,
@@ -873,18 +889,38 @@
       }, { position: 'topleft', collapsed: true });
     eventControl.addTo(map);
 
-    // === 修改標題 ===
-    setTimeout(() => {
-      // 找到 Leaflet 控制器的 DOM
-      const controls = document.querySelectorAll('.leaflet-control-layers');
-      if (controls.length >= 3) {
-        controls[1].querySelector('.leaflet-control-layers-toggle').title = "行人專用";
-        controls[1].insertAdjacentHTML("afterbegin", "<div class='custom-title'>行人專用</div>");
 
-        controls[2].querySelector('.leaflet-control-layers-toggle').title = "駕駛人專用";
-        controls[2].insertAdjacentHTML("afterbegin", "<div class='custom-title'>駕駛人專用</div>");
+    // === 隱藏預設小圖示 + 加上自訂標題與小 icon ===
+    setTimeout(() => {
+      const controls = document.querySelectorAll('.leaflet-control-layers');
+
+      if (controls.length > 1) {
+        const pedCtrl = controls[1];
+        const togglePed = pedCtrl.querySelector('.leaflet-control-layers-toggle');
+        if (togglePed) togglePed.style.display = "none";
+
+        // 加上標題 + icon
+        pedCtrl.insertAdjacentHTML("afterbegin", `
+      <div class='custom-title'>
+        行人專用 <img src="https://i.postimg.cc/tgy6qZGm/walk.png" style="width:16px;height:16px;vertical-align:middle;margin-left:4px;">
+      </div>
+    `);
+      }
+
+      if (controls.length > 2) {
+        const drvCtrl = controls[2];
+        const toggleDrv = drvCtrl.querySelector('.leaflet-control-layers-toggle');
+        if (toggleDrv) toggleDrv.style.display = "none";
+
+        // 加上標題 + icon
+        drvCtrl.insertAdjacentHTML("afterbegin", `
+      <div class='custom-title'>
+        駕駛人專用 <img src="https://i.postimg.cc/ZnrBz4Dh/sports-car.png" style="width:16px;height:16px;vertical-align:middle;margin-left:4px;">
+      </div>
+    `);
       }
     }, 100);
+
 
     // 執行
     // CCTV(只抓一次)
