@@ -99,11 +99,12 @@
 
     /* 地圖 */
     #map {
-      height: calc(100% - 200px); /* 地圖自動填滿剩下空間 */
+      height: calc(100% - 200px);
+      /* 地圖自動填滿剩下空間 */
       width: 100%;
       font-size: 14px;
     }
-    
+
     .leaflet-control {
       z-index: 2000 !important;
     }
@@ -975,14 +976,13 @@
     });
 
     // 1️⃣ 場內停車場 (基本資料 + 即時剩餘位)
+    // ✅ 場內停車：基本 + 即時，並註冊 marker 供搜尋使用
     async function loadOffStreetParking() {
-      const token = await getToken(3); // 第三組 API
+      const token = await getToken(3);
       if (!token) return;
 
-      const urlBase =
-        "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/CarPark/City/Tainan?$format=JSON";
-      const urlAvail =
-        "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/ParkingAvailability/City/Tainan?$format=JSON";
+      const urlBase = "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/CarPark/City/Tainan?$format=JSON";
+      const urlAvail = "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/ParkingAvailability/City/Tainan?$format=JSON";
 
       try {
         const [resBase, resAvail] = await Promise.all([
@@ -993,34 +993,39 @@
         const base = resBase.data?.CarParks || [];
         const avail = resAvail.data?.ParkingAvailabilities || [];
 
-        console.log("🏢 場內停車場基本數量：", base.length);
-        console.log("🏢 場內停車場即時數量：", avail.length);
-
         base.forEach((park) => {
           const lat = park.CarParkPosition?.PositionLat;
           const lon = park.CarParkPosition?.PositionLon;
-          if (!lat || !lon) return;
+          if (lat == null || lon == null) return;
 
-          // 強制字串比對 ID
-          const match = avail.find(
-            (a) => String(a.CarParkID) === String(park.CarParkID)
-          );
+          const match = avail.find(a => String(a.CarParkID) === String(park.CarParkID));
 
           const name = park.CarParkName?.Zh_tw || "未知停車場";
           const total = match?.TotalSpaces ?? "未知";
           const available = match?.AvailableSpaces ?? "未知";
-          const update = match?.DataCollectTime || match?.UpdateTime || "無";
+
+          // 安全處理時間
+          let updateText = "無";
+          const u = match?.DataCollectTime || match?.UpdateTime;
+          if (u) {
+            const d = new Date(u);
+            if (!isNaN(d)) updateText = d.toLocaleString();
+          }
 
           const html = `
         <b>${name}</b><br/>
         總車位數：${total}<br/>
         剩餘車位數：${available}<br/>
-        更新時間：${new Date(update).toLocaleString()}
+        更新時間：${updateText}
       `;
 
-          L.marker([lat, lon], { icon: parkingIcon })
+          // 🔸 正確宣告 marker，並加入群集 & 索引
+          const marker = L.marker([lat, lon], { icon: parkingIcon })
             .bindPopup(html)
             .addTo(parkingCluster);
+
+          // 這行要存在（你前面已經有 registerParkingMarker）
+          registerParkingMarker(lat, lon, marker);
         });
 
         console.log("✅ 場內停車場載入完成");
@@ -1029,17 +1034,16 @@
       }
     }
 
+
     // 2️⃣ 路邊停車場 (基本資料 + 總格數 + 即時剩餘位)
+    // ✅ 路邊停車：基本 + 總格數 + 即時，並註冊 marker 供搜尋使用
     async function loadOnStreetParking() {
       const token = await getToken(3);
       if (!token) return;
 
-      const urlBase =
-        "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegment/City/Tainan?$format=JSON";
-      const urlSpace =
-        "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegmentSpace/City/Tainan?$format=JSON";
-      const urlAvail =
-        "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegmentAvailability/City/Tainan?$format=JSON";
+      const urlBase = "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegment/City/Tainan?$format=JSON";
+      const urlSpace = "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegmentSpace/City/Tainan?$format=JSON";
+      const urlAvail = "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegmentAvailability/City/Tainan?$format=JSON";
 
       try {
         const [resBase, resSpace, resAvail] = await Promise.all([
@@ -1049,50 +1053,44 @@
         ]);
 
         const base = resBase.data?.ParkingSegments || [];
-        const spaces = resSpace.data?.CrubSegmentParkingSpaces || [];
+        // 有些資料欄位是 Crub… 有些是 Curb… 兩個都容錯處理
+        const spaces = resSpace.data?.CrubSegmentParkingSpaces || resSpace.data?.CurbSegmentParkingSpaces || [];
         const avails = resAvail.data?.CurbParkingSegmentAvailabilities || [];
-        [];
-
-        console.log("🛣 路邊停車段基本數量：", base.length);
-        console.log("🛣 路邊停車段格數數量：", spaces.length);
-        console.log("🛣 路邊停車段即時數量：", avails.length);
 
         base.forEach((seg) => {
           const lat = seg.ParkingSegmentPosition?.PositionLat;
           const lon = seg.ParkingSegmentPosition?.PositionLon;
-          if (!lat || !lon) return;
+          if (lat == null || lon == null) return;
 
-          const matchSpace = spaces.find(
-            (s) => String(s.ParkingSegmentID) === String(seg.ParkingSegmentID)
-          );
-          const matchAvail = avails.find(
-            (a) => String(a.ParkingSegmentID) === String(seg.ParkingSegmentID)
-          );
+          const matchSpace = spaces.find(s => String(s.ParkingSegmentID) === String(seg.ParkingSegmentID));
+          const matchAvail = avails.find(a => String(a.ParkingSegmentID) === String(seg.ParkingSegmentID));
 
           const name = seg.ParkingSegmentName?.Zh_tw || "未知路段";
-          const total = matchSpace?.TotalSpaces ?? "未知";
+          const total = matchAvail?.TotalSpaces ?? matchSpace?.TotalSpaces ?? "未知";
           const available = matchAvail?.AvailableSpaces ?? "未知";
 
-          // 🔒 安全處理時間
-          let update = "無";
-          if (matchAvail?.DataCollectTime) {
-            const t = new Date(matchAvail.DataCollectTime);
-            if (!isNaN(t)) {
-              update = t.toLocaleString();
-            }
+          // 安全處理時間
+          let updateText = "無";
+          const u = matchAvail?.DataCollectTime || matchAvail?.UpdateTime;
+          if (u) {
+            const d = new Date(u);
+            if (!isNaN(d)) updateText = d.toLocaleString();
           }
 
-
           const html = `
-            <b>${name}</b><br/>
-            總車位數：${total}<br/>
-            剩餘車位數：${available}<br/>
-            更新時間：${update}
-          `;
+        <b>${name}</b><br/>
+        總車位數：${total}<br/>
+        剩餘車位數：${available}<br/>
+        更新時間：${updateText}
+      `;
 
-          L.marker([lat, lon], { icon: parkingIcon })
+          // 🔸 正確宣告 marker，並加入群集 & 索引
+          const marker = L.marker([lat, lon], { icon: parkingIcon })
             .bindPopup(html)
             .addTo(parkingCluster);
+
+          // 這行要存在（你前面已經有 registerParkingMarker）
+          registerParkingMarker(lat, lon, marker);
         });
 
         console.log("✅ 路邊停車載入完成");
@@ -1100,8 +1098,6 @@
         console.error("❌ 路邊停車位讀取失敗", err);
       }
     }
-
-
 
     // 3️⃣ 停車圖例
     const parkingLegend = L.control({ position: "bottomright" });
@@ -1133,29 +1129,29 @@
     let offStreetData = [];
     let onStreetData = [];
 
-    // ✅ 找原本圖層的 marker（需自己補圖層邏輯）
-    function findLayerByLatLng(lat, lng) {
-      let foundLayer = null;
-      map.eachLayer(layer => {
-        if (layer.getLatLng) {
-          const pos = layer.getLatLng();
-          if (Math.abs(pos.lat - lat) < 0.0001 && Math.abs(pos.lng - lng) < 0.0001) {
-            foundLayer = layer;
-          }
-        }
-      });
-      return foundLayer;
+    // 以「經緯度字串」索引原本地圖上的 marker，搜尋點擊時好定位
+    const markerIndex = new Map(); // key: "lat,lng" -> Leaflet Marker
+    function keyLatLng(lat, lng) {
+      return `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
+    }
+    function registerParkingMarker(lat, lng, marker) {
+      markerIndex.set(keyLatLng(lat, lng), marker);
+    }
+    function findMarker(lat, lng) {
+      return markerIndex.get(keyLatLng(lat, lng)) || null;
     }
 
+    // 只抓基本資料（名稱/地址/座標…）供搜尋用；模糊搜尋用 includes，不分大小寫
     async function loadOffStreet() {
       const url = "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/CarPark/City/Tainan?$format=JSON";
       const res = await axios.get(url);
-      offStreetData = res.data.CarParks.map(p => ({
+      offStreetData = (res.data.CarParks || []).map(p => ({
+        id: p.CarParkID,
         type: "場內停車場",
-        name: p.CarParkName.Zh_tw,
-        address: p.Address,
-        lat: p.CarParkPosition.PositionLat,
-        lng: p.CarParkPosition.PositionLon,
+        name: p.CarParkName?.Zh_tw || "",
+        address: p.Address || "",
+        lat: p.CarParkPosition?.PositionLat,
+        lng: p.CarParkPosition?.PositionLon,
         desc: p.Description || "",
         fare: p.FareDescription || ""
       }));
@@ -1164,83 +1160,98 @@
     async function loadOnStreet() {
       const url = "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegment/City/Tainan?$format=JSON";
       const res = await axios.get(url);
-      onStreetData = res.data.ParkingSegments.map(p => ({
+      onStreetData = (res.data.ParkingSegments || []).map(p => ({
+        id: p.ParkingSegmentID,
         type: "路邊停車場",
-        name: p.ParkingSegmentName.Zh_tw,        // ✅ 中華路在這裡
-        address: p.Description || "",            // 小東路至中山南路
-        lat: p.ParkingSegmentPosition.PositionLat,
-        lng: p.ParkingSegmentPosition.PositionLon,
+        name: p.ParkingSegmentName?.Zh_tw || "",
+        address: p.Description || "", // 例如「小東路至中山南路」
+        lat: p.ParkingSegmentPosition?.PositionLat,
+        lng: p.ParkingSegmentPosition?.PositionLon,
         desc: p.Description || "",
         fare: p.FareDescription || ""
       }));
     }
 
-
-    // 搜尋功能 (模糊比對，不分大小寫)
+    // 模糊搜尋（名稱/地址皆可）
     function searchParking(keyword) {
-      keyword = keyword.trim().toLowerCase();
-      if (!keyword) return [];
-
-      let results1 = offStreetData.filter(p =>
-        (p.name && p.name.toLowerCase().includes(keyword)) ||
-        (p.address && p.address.toLowerCase().includes(keyword))
-      );
-
-      let results2 = onStreetData.filter(p =>
-        (p.name && p.name.toLowerCase().includes(keyword)) ||
-        (p.address && p.address.toLowerCase().includes(keyword))
-      );
-
-      console.log("搜尋關鍵字:", keyword, "場內筆數:", results1.length, "路邊筆數:", results2.length);
-
-      return [...results1, ...results2];
+      const k = keyword.trim().toLowerCase();
+      if (!k) return [];
+      const f = (p) =>
+        (p.name && p.name.toLowerCase().includes(k)) ||
+        (p.address && p.address.toLowerCase().includes(k));
+      const r1 = offStreetData.filter(f);
+      const r2 = onStreetData.filter(f);
+      console.log("搜尋關鍵字:", k, "場內筆數:", r1.length, "路邊筆數:", r2.length);
+      return [...r1, ...r2];
     }
 
-
+    // 用 createElement + appendChild（❌ 不要再混用 innerHTML += 破壞事件綁定）
     function showResults(results) {
       const resultDiv = document.getElementById("search-result");
       const infoDiv = document.getElementById("parking-info");
       resultDiv.innerHTML = "";
       infoDiv.innerHTML = "";
 
-      if (results.length === 0) {
-        resultDiv.innerHTML = "<p>找不到相關停車場</p>";
+      if (!results.length) {
+        resultDiv.textContent = "找不到相關停車場";
         return;
       }
 
-      let list = document.createElement("ul");
-      results.forEach((p, idx) => {
-        let item = document.createElement("li");
-        let btn = document.createElement("img");
-        btn.src = "https://i.postimg.cc/c4bSzTKs/image.png"; // 任意 icon，可自行換
-        btn.onclick = () => {
-          // 定位到原本圖層
-          const layer = findLayerByLatLng(p.lat, p.lng);
-          if (layer) {
-            map.setView([p.lat, p.lng], 17);
-            layer.openPopup && layer.openPopup();
+      const ul = document.createElement("ul");
+
+      results.forEach((p) => {
+        const li = document.createElement("li");
+
+        const btn = document.createElement("img");
+        btn.src = "https://i.postimg.cc/c4bSzTKs/image.png";
+        btn.alt = "定位到地圖";
+
+        const label = document.createElement("span");
+        label.innerHTML = `<b>${p.name}</b> (${p.type}) - ${p.address}`;
+
+        btn.addEventListener("click", () => {
+          // 🚩 確保停車資訊圖層已經打開
+          if (!map.hasLayer(allParkingLayer)) {
+            map.addLayer(allParkingLayer);
           }
 
-          // 顯示表格資訊
-          infoDiv.innerHTML = `
-          <table>
-            <tr><td>名稱</td><td>${p.name}</td></tr>
-            <tr><td>類型</td><td>${p.type}</td></tr>
-            <tr><td>地址/路段</td><td>${p.address}</td></tr>
-            <tr><td>收費資訊</td><td>${p.fare}</td></tr>
-            <tr><td>描述</td><td>${p.desc}</td></tr>
-          </table>
-          <br>
-          <button onclick='showResults(window._lastResults)'>回到清單</button>
-          <button onclick='clearSearch()'>清除</button>
-        `;
-        };
+          // 1) 地圖定位 + 原 marker 開 popup
+          const marker = findMarker(p.lat, p.lng);
+          map.setView([p.lat, p.lng], 17);
+          if (marker && marker.openPopup) marker.openPopup();
 
-        item.appendChild(btn);
-        item.innerHTML += `<span><b>${p.name}</b> (${p.type}) - ${p.address}</span>`;
-        list.appendChild(item);
+          // 2) 左側清單只顯示被點選的那筆
+          resultDiv.innerHTML = `
+        <p><b>${p.name}</b> (${p.type}) - ${p.address}</p>
+      `;
+
+          // 3) 右側表格
+          infoDiv.innerHTML = `
+        <table>
+          <tr><td>名稱</td><td>${p.name}</td></tr>
+          <tr><td>類型</td><td>${p.type}</td></tr>
+          <tr><td>地址/路段</td><td>${p.address}</td></tr>
+          <tr><td>收費資訊</td><td>${p.fare}</td></tr>
+          <tr><td>描述</td><td>${p.desc}</td></tr>
+        </table>
+        <br/>
+        <button id="backToListBtn">回到清單</button>
+        <button id="clearBtn">清除</button>
+      `;
+
+          // 綁定右側按鈕
+          document.getElementById("backToListBtn")?.addEventListener("click", () => {
+            showResults(window._lastResults || []);
+          });
+          document.getElementById("clearBtn")?.addEventListener("click", clearSearch);
+        });
+
+        li.appendChild(btn);
+        li.appendChild(label);
+        ul.appendChild(li);
       });
-      resultDiv.appendChild(list);
+
+      resultDiv.appendChild(ul);
       window._lastResults = results;
     }
 
@@ -1251,9 +1262,8 @@
     }
 
     function doSearch() {
-      const keyword = document.getElementById("searchInput").value;
-      const results = searchParking(keyword);
-      showResults(results);
+      const keyword = document.getElementById("searchInput").value || "";
+      showResults(searchParking(keyword));
     }
 
     document.getElementById("searchBtn").addEventListener("click", doSearch);
@@ -1261,26 +1271,16 @@
       if (e.key === "Enter") doSearch();
     });
 
-
+    // 初始化：先把搜尋用的靜態資料抓好
     async function initData() {
       await loadOffStreet();
       await loadOnStreet();
       console.log("資料載入完成 ✅ 場內:", offStreetData.length, " 路邊:", onStreetData.length);
     }
-
-    // 頁面載入時，先把資料抓好
     initData();
-
-    // 每 30 秒更新一次
-    setInterval(async () => {
-      parkingCluster.clearLayers();  // 先清空舊的
-      await loadOffStreetParking();
-      await loadOnStreetParking();
-      console.log("♻️ 停車資訊已更新");
-    }, 30000);
-
-
     // #endregion
+
+
 
 
 
