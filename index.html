@@ -8,8 +8,16 @@
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Esri Leaflet -->
+  <script src="https://unpkg.com/esri-leaflet"></script>
+
+  <!-- Esri Leaflet Vector (這個是你缺的) -->
+  <script src="https://unpkg.com/esri-leaflet-vector/dist/esri-leaflet-vector.js"></script>
+
   <!-- Axios -->
   <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+
   <!-- Leaflet PIP (Point in Polygon) -->
   <script src="https://unpkg.com/leaflet-pip/leaflet-pip.min.js"></script>
   <script src="https://unpkg.com/wellknown/wellknown.js"></script>
@@ -25,14 +33,77 @@
     body {
       margin: 0;
       padding: 0;
+      overflow: hidden;
+      /* 🚫 禁止頁面滾動 */
     }
 
+    /* 搜尋區塊 */
+    #search-panel {
+      height: 200px;
+      /* 🚨 把高度拉大 */
+      width: 100%;
+      display: flex;
+      background: #f8f8f8;
+      border-bottom: 1px solid #ccc;
+      box-sizing: border-box;
+      padding: 10px;
+      overflow-y: auto;
+      /* 若搜尋結果很多，可以捲動 */
+    }
+
+
+
+    #search-left {
+      flex: 1;
+    }
+
+    #search-right {
+      flex: 1;
+      padding-left: 20px;
+    }
+
+    #search-result ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    #search-result li {
+      margin: 5px 0;
+      display: flex;
+      align-items: center;
+    }
+
+    #search-result img {
+      width: 20px;
+      height: 20px;
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    td {
+      border: 1px solid #ddd;
+      padding: 5px;
+    }
+
+    td:first-child {
+      font-weight: bold;
+      background: #f0f0f0;
+      width: 100px;
+    }
+
+
+    /* 地圖 */
     #map {
-      height: 100vh;
+      height: calc(100% - 200px); /* 地圖自動填滿剩下空間 */
       width: 100%;
       font-size: 14px;
     }
-
+    
     .leaflet-control {
       z-index: 2000 !important;
     }
@@ -92,10 +163,32 @@
 </head>
 
 <body>
+  <div id="search-panel">
+    <!-- 左邊：標題 + 搜尋框 + 搜尋結果 -->
+    <div id="search-left">
+      <h3>停車場搜尋</h3>
+      <input type="text" id="searchInput" placeholder="輸入停車場名稱或路名" />
+      <button id="searchBtn">搜尋</button>
+      <div id="search-result"></div>
+    </div>
+
+    <!-- 右邊：停車場詳細資訊 -->
+    <div id="search-right">
+      <div id="parking-info"></div>
+    </div>
+  </div>
+
+
+  <!-- ✅ 地圖 -->
   <div id="map"></div>
 
   <script>
     // #region token&API
+    //////////// ArcGIS API KEY ///////////
+    const apiKey = "AAPTxy8BH1VEsoebNVZXo8HurPmKbml4Xdo-kIrZXnIIXHuIpyePMxAf7D7j0kCiZHlxnOLiWZ3NbpGfSYmz8iPk5TIrYOw2a1DL4OGMyB4hJFTPgCLq61NLRFZ0NRBcoHtYYQAW7hYr1B7LPA7Qvec-kKDlpaycqpGL3FhNfuiw9OTe1BqfWeTAdeX3FP2SGVZzgAMpNi_OhPOuQIza3qG8ZmYpKRZROGhuggb1VOzC_IU.AT1_KsghUkW2";
+
+
+    /////////// TDX API KEY /////////////
     // 第一組 (專門給 CCTV、道路事件用)
     const AppID1 = "f64114051-51c79fb9-4206-46dc";
     const AppKey1 = "f20440d9-6d85-4aa5-ab13-5389cb2a6919";
@@ -175,6 +268,8 @@
       "正射影像圖": orthophoto,
       "OpenStreetMap": osm
     };
+
+
     // #endregion
 
     // #region////// 滑鼠位置顯示座標 /////////////
@@ -955,7 +1050,8 @@
 
         const base = resBase.data?.ParkingSegments || [];
         const spaces = resSpace.data?.CrubSegmentParkingSpaces || [];
-        const avails = resAvail.data?.ParkingSegmentAvailabilities || [];
+        const avails = resAvail.data?.CurbParkingSegmentAvailabilities || [];
+        [];
 
         console.log("🛣 路邊停車段基本數量：", base.length);
         console.log("🛣 路邊停車段格數數量：", spaces.length);
@@ -976,14 +1072,23 @@
           const name = seg.ParkingSegmentName?.Zh_tw || "未知路段";
           const total = matchSpace?.TotalSpaces ?? "未知";
           const available = matchAvail?.AvailableSpaces ?? "未知";
-          const update = matchAvail?.UpdateTime || "無";
+
+          // 🔒 安全處理時間
+          let update = "無";
+          if (matchAvail?.DataCollectTime) {
+            const t = new Date(matchAvail.DataCollectTime);
+            if (!isNaN(t)) {
+              update = t.toLocaleString();
+            }
+          }
+
 
           const html = `
-        <b>${name}</b><br/>
-        總車位數：${total}<br/>
-        剩餘車位數：${available}<br/>
-        更新時間：${new Date(update).toLocaleString()}
-      `;
+            <b>${name}</b><br/>
+            總車位數：${total}<br/>
+            剩餘車位數：${available}<br/>
+            更新時間：${update}
+          `;
 
           L.marker([lat, lon], { icon: parkingIcon })
             .bindPopup(html)
@@ -1024,6 +1129,158 @@
 
     // #endregion
 
+    // #region /////// 搜尋停車位 //////////
+    let offStreetData = [];
+    let onStreetData = [];
+
+    // ✅ 找原本圖層的 marker（需自己補圖層邏輯）
+    function findLayerByLatLng(lat, lng) {
+      let foundLayer = null;
+      map.eachLayer(layer => {
+        if (layer.getLatLng) {
+          const pos = layer.getLatLng();
+          if (Math.abs(pos.lat - lat) < 0.0001 && Math.abs(pos.lng - lng) < 0.0001) {
+            foundLayer = layer;
+          }
+        }
+      });
+      return foundLayer;
+    }
+
+    async function loadOffStreet() {
+      const url = "https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/CarPark/City/Tainan?$format=JSON";
+      const res = await axios.get(url);
+      offStreetData = res.data.CarParks.map(p => ({
+        type: "場內停車場",
+        name: p.CarParkName.Zh_tw,
+        address: p.Address,
+        lat: p.CarParkPosition.PositionLat,
+        lng: p.CarParkPosition.PositionLon,
+        desc: p.Description || "",
+        fare: p.FareDescription || ""
+      }));
+    }
+
+    async function loadOnStreet() {
+      const url = "https://tdx.transportdata.tw/api/basic/v1/Parking/OnStreet/ParkingSegment/City/Tainan?$format=JSON";
+      const res = await axios.get(url);
+      onStreetData = res.data.ParkingSegments.map(p => ({
+        type: "路邊停車場",
+        name: p.ParkingSegmentName.Zh_tw,        // ✅ 中華路在這裡
+        address: p.Description || "",            // 小東路至中山南路
+        lat: p.ParkingSegmentPosition.PositionLat,
+        lng: p.ParkingSegmentPosition.PositionLon,
+        desc: p.Description || "",
+        fare: p.FareDescription || ""
+      }));
+    }
+
+
+    // 搜尋功能 (模糊比對，不分大小寫)
+    function searchParking(keyword) {
+      keyword = keyword.trim().toLowerCase();
+      if (!keyword) return [];
+
+      let results1 = offStreetData.filter(p =>
+        (p.name && p.name.toLowerCase().includes(keyword)) ||
+        (p.address && p.address.toLowerCase().includes(keyword))
+      );
+
+      let results2 = onStreetData.filter(p =>
+        (p.name && p.name.toLowerCase().includes(keyword)) ||
+        (p.address && p.address.toLowerCase().includes(keyword))
+      );
+
+      console.log("搜尋關鍵字:", keyword, "場內筆數:", results1.length, "路邊筆數:", results2.length);
+
+      return [...results1, ...results2];
+    }
+
+
+    function showResults(results) {
+      const resultDiv = document.getElementById("search-result");
+      const infoDiv = document.getElementById("parking-info");
+      resultDiv.innerHTML = "";
+      infoDiv.innerHTML = "";
+
+      if (results.length === 0) {
+        resultDiv.innerHTML = "<p>找不到相關停車場</p>";
+        return;
+      }
+
+      let list = document.createElement("ul");
+      results.forEach((p, idx) => {
+        let item = document.createElement("li");
+        let btn = document.createElement("img");
+        btn.src = "https://i.postimg.cc/c4bSzTKs/image.png"; // 任意 icon，可自行換
+        btn.onclick = () => {
+          // 定位到原本圖層
+          const layer = findLayerByLatLng(p.lat, p.lng);
+          if (layer) {
+            map.setView([p.lat, p.lng], 17);
+            layer.openPopup && layer.openPopup();
+          }
+
+          // 顯示表格資訊
+          infoDiv.innerHTML = `
+          <table>
+            <tr><td>名稱</td><td>${p.name}</td></tr>
+            <tr><td>類型</td><td>${p.type}</td></tr>
+            <tr><td>地址/路段</td><td>${p.address}</td></tr>
+            <tr><td>收費資訊</td><td>${p.fare}</td></tr>
+            <tr><td>描述</td><td>${p.desc}</td></tr>
+          </table>
+          <br>
+          <button onclick='showResults(window._lastResults)'>回到清單</button>
+          <button onclick='clearSearch()'>清除</button>
+        `;
+        };
+
+        item.appendChild(btn);
+        item.innerHTML += `<span><b>${p.name}</b> (${p.type}) - ${p.address}</span>`;
+        list.appendChild(item);
+      });
+      resultDiv.appendChild(list);
+      window._lastResults = results;
+    }
+
+    function clearSearch() {
+      document.getElementById("search-result").innerHTML = "";
+      document.getElementById("parking-info").innerHTML = "";
+      document.getElementById("searchInput").value = "";
+    }
+
+    function doSearch() {
+      const keyword = document.getElementById("searchInput").value;
+      const results = searchParking(keyword);
+      showResults(results);
+    }
+
+    document.getElementById("searchBtn").addEventListener("click", doSearch);
+    document.getElementById("searchInput").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") doSearch();
+    });
+
+
+    async function initData() {
+      await loadOffStreet();
+      await loadOnStreet();
+      console.log("資料載入完成 ✅ 場內:", offStreetData.length, " 路邊:", onStreetData.length);
+    }
+
+    // 頁面載入時，先把資料抓好
+    initData();
+
+    // 每 30 秒更新一次
+    setInterval(async () => {
+      parkingCluster.clearLayers();  // 先清空舊的
+      await loadOffStreetParking();
+      await loadOnStreetParking();
+      console.log("♻️ 停車資訊已更新");
+    }, 30000);
+
+
+    // #endregion
 
 
 
@@ -1117,6 +1374,9 @@
     // 停車位
     loadOffStreetParking();
     loadOnStreetParking();
+    // 搜尋停車位
+    // loadOffStreet();
+    // loadOnStreet();
 
 
     // 即時資訊(延遲&定時更新)
