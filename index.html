@@ -294,7 +294,8 @@
     infoControl.onAdd = function (map) {
       var div = L.DomUtil.create('div', 'info-control');
       div.innerHTML = '<b>點擊此處回到台南市</b>';
-      div.style.backgroundColor = 'rgba(255, 255, 255, 0.7)';
+      div.style.backgroundColor = 'rgba(0,170,170,0.5)';
+      div.style.color = '#fff';
       div.style.padding = '5px';
       div.style.borderRadius = '5px';
       div.style.fontSize = '16px';
@@ -309,6 +310,32 @@
       return div;
     };
     infoControl.addTo(map);
+    // #endregion
+
+    // #region //////共用函式：點自動縮放/////////
+    // CCTV 專用：點擊後縮放並往上偏移
+    function addZoomOnClickCCTV(marker, lat, lon, zoom = 15) {
+      marker.on("click", () => {
+        map.setView([lat, lon], zoom, { animate: true });
+      });
+
+      // popup 開啟後再平移
+      marker.on("popupopen", () => {
+        setTimeout(() => {
+          map.panBy([0, -150]); // ✅ 往上移 150px
+        }, 200); // 延遲一點，等 popup 定位好
+      });
+    }
+
+
+    // 其他
+    function addZoomOnClick(marker, lat, lon, zoom = 15) {
+      marker.on("click", () => {
+        map.flyTo([lat, lon], zoom);
+        marker.openPopup();
+      });
+    }
+
     // #endregion
 
     // #region ////// 台南市區界圖層 ////// 
@@ -402,9 +429,10 @@
         headers: { Authorization: `Bearer ${token}` }
       }).then(res => {
         (res.data.CCTVs || []).forEach(c => {
-          L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon })
+          const marker = L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon })
             .bindPopup(createCCTVPopup(c.RoadName, c.VideoStreamURL), { maxWidth: "640", maxHeight: "480" })
             .addTo(cityCCTVLayer);
+          addZoomOnClickCCTV(marker, c.PositionLat, c.PositionLon);
         });
       }).catch(err => console.error("❌ 市區 CCTV 讀取失敗", err));
     }
@@ -424,9 +452,10 @@
           );
 
           filtered.forEach(c => {
-            L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon1 })
+            const marker = L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon1 })
               .bindPopup(createCCTVPopup(c.RoadName, c.VideoStreamURL), { maxWidth: "640", maxHeight: "480" })
               .addTo(highwayCCTVLayer);
+            addZoomOnClickCCTV(marker, c.PositionLat, c.PositionLon);
           });
         })
         .catch(err => console.error("❌ 高速公路 CCTV 讀取失敗", err));
@@ -447,9 +476,10 @@
           );
 
           filtered.forEach(c => {
-            L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon2 })
+            const marker = L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon2 })
               .bindPopup(createCCTVPopup(c.RoadName, c.VideoStreamURL), { maxWidth: "640", maxHeight: "480" })
               .addTo(provinceCCTVLayer);
+            addZoomOnClickCCTV(marker, c.PositionLat, c.PositionLon);
           });
         })
         .catch(err => console.error("❌ 省道 CCTV 讀取失敗", err));
@@ -568,9 +598,10 @@
 
         </div>
       `;
-          L.marker(latlng, { icon: getEventIcon(ev.Description) })
+          const marker = L.marker(latlng, { icon: getEventIcon(ev.Description) })
             .bindPopup(popupHtml)
             .addTo(targetLayer);
+          addZoomOnClick(marker, latlng[0], latlng[1]);
         });
 
         // 設定自動刷新
@@ -589,7 +620,6 @@
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Freeway?$format=JSON", freewayEventsLayer);
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Highway?$format=JSON", highwayEventsLayer);
     }
-
 
     // 即時道路事件圖例
     // 建立圖例（但先不要加到 map）
@@ -655,7 +685,11 @@
 
     // (2) 公共自行車 (YouBike)
     const youbikeLayer = L.layerGroup();
-    const youbikeCluster = L.markerClusterGroup();
+    const youbikeCluster = L.markerClusterGroup({
+      disableClusteringAtZoom: 15,  // 📍 放大到 15 級以上時自動拆開
+      spiderfyOnMaxZoom: true,      // 📍 點擊群集時展開顯示個別點
+      showCoverageOnHover: true    // 📍 移到群集上顯示藍色覆蓋範圍
+    });
     youbikeLayer.addLayer(youbikeCluster);
 
     const youbikeIcon = L.icon({
@@ -696,6 +730,7 @@
 
           youbikeCluster.addLayer(marker);
           youbikeMarkers.set(st.StationUID, marker);
+          addZoomOnClick(marker, lat, lon);
         });
 
       } catch (err) {
@@ -767,60 +802,78 @@
 
 
     // #region ////// 台南市公車 ////////
-    // (1) 公車路線
+
+    // === 路線名稱表 (可用於服務路線對照) ===
+    const routeNameByUID = new Map();
+    const routeNameByID = new Map();
+    const subNameByUID = new Map();
+    const subNameByID = new Map();
+
+    // === ETA 對照表 StopUID -> ETA 陣列 ===
+    let arrivalMap = new Map();
+
+    // (0) 載入路線資料（存名稱表）
+    async function loadBusRoutesMeta() {
+      const token = await getToken(2);
+      if (!token) return;
+      const url = "https://tdx.transportdata.tw/api/basic/v2/Bus/Route/City/Tainan?$format=JSON";
+      try {
+        const { data: routes = [] } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+        routes.forEach(r => {
+          const rName = r.RouteName?.Zh_tw || "未知路線";
+          if (r.RouteUID) routeNameByUID.set(r.RouteUID, rName);
+          if (r.RouteID) routeNameByID.set(r.RouteID, rName);
+          (r.SubRoutes || []).forEach(sr => {
+            const srName = sr.SubRouteName?.Zh_tw || rName;
+            if (sr.SubRouteUID) subNameByUID.set(sr.SubRouteUID, srName);
+            if (sr.SubRouteID) subNameByID.set(sr.SubRouteID, srName);
+          });
+        });
+        console.log("✅ 公車路線名稱表完成", routeNameByUID.size, "筆");
+      } catch (err) {
+        console.error("❌ 公車路線名稱讀取失敗", err);
+      }
+    }
+
+    // (1) 公車路線圖層
     const busRouteLayer = L.layerGroup();
     async function loadBusRoutes() {
       const token = await getToken(2);
       if (!token) return;
 
       const url = "https://tdx.transportdata.tw/api/basic/V3/Map/Bus/Network/Route/City/Tainan?$format=GEOJSON";
-
       try {
-        const res = await axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
         busRouteLayer.clearLayers();
-
         if (res.data && res.data.type === "FeatureCollection") {
           L.geoJSON(res.data, {
-            style: {
-              color: "#FAA94B",   // 公車路線用橘色
-              weight: 1.5,
-              opacity: 0.8
-            }
+            style: { color: "#FAA94B", weight: 1.5, opacity: 0.8 }
           }).addTo(busRouteLayer);
         }
-
         console.log("✅ 公車路線載入完成");
       } catch (err) {
         console.error("❌ 公車路線讀取失敗", err);
       }
     }
 
-    // (2) 公車站位 (用 /Bus/Station)
+    // (2) 公車站位
     const busStopLayer = L.layerGroup();
     const busStopCluster = L.markerClusterGroup({
-      disableClusteringAtZoom: 17,  // 📍 放大到 15 級以上時自動拆開
-      spiderfyOnMaxZoom: true,      // 📍 點擊群集時展開顯示個別點
-      showCoverageOnHover: true    // 📍 移到群集上不顯示藍色覆蓋範圍
+      disableClusteringAtZoom: 15,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: true
     });
     busStopLayer.addLayer(busStopCluster);
 
     async function loadBusStations() {
       const token = await getToken(2);
       if (!token) return;
-
       const url = "https://tdx.transportdata.tw/api/basic/v3/Bus/Station/City/Tainan?$format=JSON";
-
       try {
-        const res = await axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
         busStopCluster.clearLayers();
 
-        const stations = res.data?.Stations || [];   // ⚡ 改這裡
+        const stations = res.data?.Stations || [];
         console.log("🚏 公車站位數量：", stations.length);
 
         stations.forEach(st => {
@@ -830,16 +883,47 @@
 
           const stationName = st.StationName?.Zh_tw || "未知站位";
 
+          // 服務路線（用 RouteUID / SubRouteUID 對照）
           const routeNames = (st.Stops || [])
-            .map(s => s.RouteName?.Zh_tw || "未知路線")
+            .map(s => subNameByUID.get(s.SubRouteUID)
+              || subNameByID.get(s.SubRouteID)
+              || routeNameByUID.get(s.RouteUID)
+              || routeNameByID.get(s.RouteID)
+              || s.SubRouteName?.Zh_tw
+              || s.RouteName?.Zh_tw
+              || null)
+            .filter(Boolean)
             .filter((v, i, arr) => arr.indexOf(v) === i);
 
+          // 即時到站
+          const etaList = arrivalMap.get(st.StationUID) || [];
+          let etaHtml = "";
+          if (etaList.length > 0) {
+            etaHtml += "<hr/><b>即時到站：</b><br/>";
+            etaList.slice(0, 5).forEach(e => {
+              let statusText = "";
+              if (e.StopStatus === 0) {
+                const mins = e.EstimateTime ? Math.floor(e.EstimateTime / 60) : null;
+                statusText = mins !== null ? `${mins} 分鐘` : "即將進站";
+              } else if (e.StopStatus === 1) statusText = "尚未發車";
+              else if (e.StopStatus === 2) statusText = "交管不停";
+              else if (e.StopStatus === 3) statusText = "末班駛離";
+              else if (e.StopStatus === 4) statusText = "今日未營運";
+
+              etaHtml += `${e.RouteName?.Zh_tw || "未知路線"} → ${statusText}<br/>`;
+            });
+          } else {
+            etaHtml += "<hr/>暫無到站資料";
+          }
+
+          // popup HTML
           let html = `<b>${stationName}</b><br/>`;
           if (routeNames.length > 0) {
             html += "服務路線：<br/>" + routeNames.join("<br/>");
           } else {
             html += "暫無路線資訊";
           }
+          html += etaHtml;
 
           const busStopIcon = L.icon({
             iconUrl: "https://i.postimg.cc/pdjJT1vs/image.png",
@@ -850,8 +934,8 @@
 
           const marker = L.marker([lat, lon], { icon: busStopIcon })
             .bindPopup(html);
-
           busStopCluster.addLayer(marker);
+          addZoomOnClick(marker, lat, lon);
         });
 
         console.log("✅ 公車站位載入完成");
@@ -860,22 +944,15 @@
       }
     }
 
-    // (3) 公車動態定時資料 (用 /Bus/RealTimeByFrequency)
+    // (3) 公車動態
     const busRealtimeLayer = L.layerGroup();
-
     async function loadBusRealtime() {
-      const token = await getToken(2); // 用第二組 API Key
+      const token = await getToken(2);
       if (!token) return;
-
       const url = "https://tdx.transportdata.tw/api/basic/v2/Bus/RealTimeByFrequency/City/Tainan?$format=JSON";
-
       try {
-        const res = await axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
         busRealtimeLayer.clearLayers();
-
         const buses = res.data || [];
         console.log("🚌 公車動態數量：", buses.length);
 
@@ -888,48 +965,83 @@
           const route = bus.RouteName?.Zh_tw || "未知路線";
           const subRoute = bus.SubRouteName?.Zh_tw || "";
           const gpsTime = bus.GPSTime ? new Date(bus.GPSTime).toLocaleString() : "無";
-          const azimuth = bus.Azimuth || 0;  // 方向角 (0~360)
+          const azimuth = bus.Azimuth || 0;
 
-          // 動態公車圖示（帶旋轉）
           const busIcon = L.divIcon({
             className: "bus-icon",
             html: `<div style="transform: rotate(${azimuth}deg);">
-             <img src="https://i.postimg.cc/PrjpdnM6/image.png" 
-                  style="width:35px;height:35px;"/>
-           </div>`,
+          <img src="https://i.postimg.cc/PrjpdnM6/image.png" style="width:35px;height:35px;"/>
+        </div>`,
             iconSize: [5, 5],
             iconAnchor: [17, 17],
             popupAnchor: [0, -17]
           });
 
           const html = `
-          <b>車牌：</b>${plate}<br/>
-          <b>路線：</b>${route}<br/>
-          ${subRoute ? `<b>子路線：</b>${subRoute}<br/>` : ""}
-          <b>定位時間：</b>${gpsTime}<br/>
-          <b>方向角：</b>${azimuth}°
-        `;
+        <b>車牌：</b>${plate}<br/>
+        <b>路線：</b>${route}<br/>
+        ${subRoute ? `<b>子路線：</b>${subRoute}<br/>` : ""}
+        <b>定位時間：</b>${gpsTime}<br/>
+        <b>方向角：</b>${azimuth}°
+      `;
 
-          L.marker([lat, lon], { icon: busIcon })
+          const marker = L.marker([lat, lon], { icon: busIcon })
             .bindPopup(html)
             .addTo(busRealtimeLayer);
+          addZoomOnClick(marker, lat, lon);
         });
 
-
-        // 每 30 秒更新一次
         setTimeout(loadBusRealtime, 30000);
-
       } catch (err) {
         console.error("❌ 公車動態讀取失敗", err);
         setTimeout(loadBusRealtime, 60000);
       }
     }
 
+    // (4) ETA 更新
+    async function loadBusETAs() {
+      const token = await getToken(2);
+      if (!token) return;
 
-    // (4) 公車資訊總圖層 (包含路線、站牌、動態)
+      const url = "https://tdx.transportdata.tw/api/basic/v3/Bus/EstimatedTimeOfArrival/City/Tainan?$format=JSON";
+      try {
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
+        // ⚡ 這裡修正：資料包在 BusEstimatedTimeOfArrival
+        const etas = res.data?.BusEstimatedTimeOfArrival || [];
+        arrivalMap.clear();
+
+        etas.forEach(e => {
+          if (!e.StopUID) return;
+          if (!arrivalMap.has(e.StopUID)) arrivalMap.set(e.StopUID, []);
+          arrivalMap.get(e.StopUID).push(e);
+        });
+
+        // Debug log
+        console.log("✅ 公車 ETA 抓到筆數：", etas.length);
+        if (etas.length > 0) {
+          console.log("範例 ETA：", etas[0]);
+        }
+        const someKey = Array.from(arrivalMap.keys())[0];
+        if (someKey) {
+          console.log("範例 StopUID：", someKey, "對應 ETA 筆數：", arrivalMap.get(someKey).length);
+        }
+
+        // 更新完 ETA → 重繪站位 popup
+        await loadBusStations();
+
+        setTimeout(loadBusETAs, 60000);
+      } catch (err) {
+        console.error("❌ 公車 ETA 讀取失敗", err);
+        setTimeout(loadBusETAs, 120000);
+      }
+    }
+
+
+    // (5) 總圖層
     const busInfoLayer = L.layerGroup([busRouteLayer, busStopLayer, busRealtimeLayer]);
 
-    // (5) 公車資訊圖例
+    // (6) 圖例
     const busLegend = L.control({ position: 'bottomright' });
     busLegend.onAdd = function () {
       const div = L.DomUtil.create('div', 'legend');
@@ -942,18 +1054,15 @@
       return div;
     };
 
-    map.on("overlayadd", function (e) {
-      if (e.name === "公車資訊") {
-        busLegend.addTo(map);
-      }
+    map.on("overlayadd", e => {
+      if (e.name === "公車資訊") busLegend.addTo(map);
     });
-    map.on("overlayremove", function (e) {
-      if (e.name === "公車資訊") {
-        map.removeControl(busLegend);
-      }
+    map.on("overlayremove", e => {
+      if (e.name === "公車資訊") map.removeControl(busLegend);
     });
 
     // #endregion
+
 
 
     // #region /////// 停車位 ///////////
@@ -976,7 +1085,6 @@
     });
 
     // 1️⃣ 場內停車場 (基本資料 + 即時剩餘位)
-    // ✅ 場內停車：基本 + 即時，並註冊 marker 供搜尋使用
     async function loadOffStreetParking() {
       const token = await getToken(3);
       if (!token) return;
@@ -1023,6 +1131,7 @@
           const marker = L.marker([lat, lon], { icon: parkingIcon })
             .bindPopup(html)
             .addTo(parkingCluster);
+          addZoomOnClick(marker, lat, lon);
 
           // 這行要存在（你前面已經有 registerParkingMarker）
           registerParkingMarker(lat, lon, marker);
@@ -1036,7 +1145,6 @@
 
 
     // 2️⃣ 路邊停車場 (基本資料 + 總格數 + 即時剩餘位)
-    // ✅ 路邊停車：基本 + 總格數 + 即時，並註冊 marker 供搜尋使用
     async function loadOnStreetParking() {
       const token = await getToken(3);
       if (!token) return;
@@ -1088,6 +1196,7 @@
           const marker = L.marker([lat, lon], { icon: parkingIcon })
             .bindPopup(html)
             .addTo(parkingCluster);
+          addZoomOnClick(marker, lat, lon);
 
           // 這行要存在（你前面已經有 registerParkingMarker）
           registerParkingMarker(lat, lon, marker);
@@ -1220,31 +1329,37 @@
           map.setView([p.lat, p.lng], 17);
           if (marker && marker.openPopup) marker.openPopup();
 
-          // 2) 左側清單只顯示被點選的那筆
+          // 2) 左側只顯示被點選的那筆 + 按鈕
           resultDiv.innerHTML = `
-        <p><b>${p.name}</b> (${p.type}) - ${p.address}</p>
-      `;
+            <div style="display:flex;align-items:center;gap:6px;">
+              <img src="https://i.postimg.cc/c4bSzTKs/image.png" 
+                  alt="icon" style="width:20px;height:20px;">
+              <span><b>${p.name}</b> (${p.type}) - ${p.address}</span>
+            </div>
+            <div style="margin-top:6px;">
+              <button id="backToListBtn">回到清單</button>
+              <button id="clearBtn">清除</button>
+            </div>
+          `;
 
           // 3) 右側表格
           infoDiv.innerHTML = `
-        <table>
-          <tr><td>名稱</td><td>${p.name}</td></tr>
-          <tr><td>類型</td><td>${p.type}</td></tr>
-          <tr><td>地址/路段</td><td>${p.address}</td></tr>
-          <tr><td>收費資訊</td><td>${p.fare}</td></tr>
-          <tr><td>描述</td><td>${p.desc}</td></tr>
-        </table>
-        <br/>
-        <button id="backToListBtn">回到清單</button>
-        <button id="clearBtn">清除</button>
-      `;
+    <table>
+      <tr><td>名稱</td><td>${p.name}</td></tr>
+      <tr><td>類型</td><td>${p.type}</td></tr>
+      <tr><td>地址/路段</td><td>${p.address}</td></tr>
+      <tr><td>收費資訊</td><td>${p.fare}</td></tr>
+      <tr><td>描述</td><td>${p.desc}</td></tr>
+    </table>
+  `;
 
-          // 綁定右側按鈕
+          // 綁定左側按鈕
           document.getElementById("backToListBtn")?.addEventListener("click", () => {
             showResults(window._lastResults || []);
           });
           document.getElementById("clearBtn")?.addEventListener("click", clearSearch);
         });
+
 
         li.appendChild(btn);
         li.appendChild(label);
@@ -1368,9 +1483,21 @@
     loadYoubikeStations();
     updateYoubikeAvailability();
     // 公車
-    loadBusRoutes();
-    loadBusStations();
-    loadBusRealtime();
+    async function initBus() {
+      await loadBusRoutesMeta();  // 先建路線名稱表
+      await loadBusRoutes();      // 公車路網
+      await loadBusStations();    // 公車站牌
+      loadBusRealtime();          // 公車即時動態（30s 更新）
+      loadBusETAs();              // 公車 ETA（60s 更新）
+    }
+
+    // 啟動
+    initBus();
+
+
+    //loadBusRoutes();
+    // loadBusStations();
+    //loadBusRealtime();
     // 停車位
     loadOffStreetParking();
     loadOnStreetParking();
