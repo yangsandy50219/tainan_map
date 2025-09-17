@@ -314,7 +314,7 @@
 
     // #region //////共用函式：點自動縮放/////////
     // CCTV 專用：點擊後縮放並往上偏移
-    function addZoomOnClickCCTV(marker, lat, lon, zoom = 15) {
+    function addZoomOnClickCCTV(marker, lat, lon, zoom = 16) {
       marker.on("click", () => {
         map.setView([lat, lon], zoom, { animate: true });
       });
@@ -329,7 +329,7 @@
 
 
     // 其他
-    function addZoomOnClick(marker, lat, lon, zoom = 15) {
+    function addZoomOnClick(marker, lat, lon, zoom = 16) {
       marker.on("click", () => {
         map.flyTo([lat, lon], zoom);
         marker.openPopup();
@@ -803,39 +803,10 @@
 
     // #region ////// 台南市公車 ////////
 
-    // === 路線名稱表 (可用於服務路線對照) ===
-    const routeNameByUID = new Map();
-    const routeNameByID = new Map();
-    const subNameByUID = new Map();
-    const subNameByID = new Map();
+    // (0) 暫存 ETA 資料
+    let busETAData = new Map();
 
-    // === ETA 對照表 StopUID -> ETA 陣列 ===
-    let arrivalMap = new Map();
-
-    // (0) 載入路線資料（存名稱表）
-    async function loadBusRoutesMeta() {
-      const token = await getToken(2);
-      if (!token) return;
-      const url = "https://tdx.transportdata.tw/api/basic/v2/Bus/Route/City/Tainan?$format=JSON";
-      try {
-        const { data: routes = [] } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
-        routes.forEach(r => {
-          const rName = r.RouteName?.Zh_tw || "未知路線";
-          if (r.RouteUID) routeNameByUID.set(r.RouteUID, rName);
-          if (r.RouteID) routeNameByID.set(r.RouteID, rName);
-          (r.SubRoutes || []).forEach(sr => {
-            const srName = sr.SubRouteName?.Zh_tw || rName;
-            if (sr.SubRouteUID) subNameByUID.set(sr.SubRouteUID, srName);
-            if (sr.SubRouteID) subNameByID.set(sr.SubRouteID, srName);
-          });
-        });
-        console.log("✅ 公車路線名稱表完成", routeNameByUID.size, "筆");
-      } catch (err) {
-        console.error("❌ 公車路線名稱讀取失敗", err);
-      }
-    }
-
-    // (1) 公車路線圖層
+    // (1) 公車路線
     const busRouteLayer = L.layerGroup();
     async function loadBusRoutes() {
       const token = await getToken(2);
@@ -844,12 +815,19 @@
       const url = "https://tdx.transportdata.tw/api/basic/V3/Map/Bus/Network/Route/City/Tainan?$format=GEOJSON";
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
         busRouteLayer.clearLayers();
+
         if (res.data && res.data.type === "FeatureCollection") {
           L.geoJSON(res.data, {
-            style: { color: "#FAA94B", weight: 1.5, opacity: 0.8 }
+            style: {
+              color: "#FAA94B",   // 公車路線用橘色
+              weight: 1.5,
+              opacity: 0.8
+            }
           }).addTo(busRouteLayer);
         }
+
         console.log("✅ 公車路線載入完成");
       } catch (err) {
         console.error("❌ 公車路線讀取失敗", err);
@@ -868,9 +846,11 @@
     async function loadBusStations() {
       const token = await getToken(2);
       if (!token) return;
+
       const url = "https://tdx.transportdata.tw/api/basic/v3/Bus/Station/City/Tainan?$format=JSON";
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
         busStopCluster.clearLayers();
 
         const stations = res.data?.Stations || [];
@@ -883,48 +863,6 @@
 
           const stationName = st.StationName?.Zh_tw || "未知站位";
 
-          // 服務路線（用 RouteUID / SubRouteUID 對照）
-          const routeNames = (st.Stops || [])
-            .map(s => subNameByUID.get(s.SubRouteUID)
-              || subNameByID.get(s.SubRouteID)
-              || routeNameByUID.get(s.RouteUID)
-              || routeNameByID.get(s.RouteID)
-              || s.SubRouteName?.Zh_tw
-              || s.RouteName?.Zh_tw
-              || null)
-            .filter(Boolean)
-            .filter((v, i, arr) => arr.indexOf(v) === i);
-
-          // 即時到站
-          const etaList = arrivalMap.get(st.StationUID) || [];
-          let etaHtml = "";
-          if (etaList.length > 0) {
-            etaHtml += "<hr/><b>即時到站：</b><br/>";
-            etaList.slice(0, 5).forEach(e => {
-              let statusText = "";
-              if (e.StopStatus === 0) {
-                const mins = e.EstimateTime ? Math.floor(e.EstimateTime / 60) : null;
-                statusText = mins !== null ? `${mins} 分鐘` : "即將進站";
-              } else if (e.StopStatus === 1) statusText = "尚未發車";
-              else if (e.StopStatus === 2) statusText = "交管不停";
-              else if (e.StopStatus === 3) statusText = "末班駛離";
-              else if (e.StopStatus === 4) statusText = "今日未營運";
-
-              etaHtml += `${e.RouteName?.Zh_tw || "未知路線"} → ${statusText}<br/>`;
-            });
-          } else {
-            etaHtml += "<hr/>暫無到站資料";
-          }
-
-          // popup HTML
-          let html = `<b>${stationName}</b><br/>`;
-          if (routeNames.length > 0) {
-            html += "服務路線：<br/>" + routeNames.join("<br/>");
-          } else {
-            html += "暫無路線資訊";
-          }
-          html += etaHtml;
-
           const busStopIcon = L.icon({
             iconUrl: "https://i.postimg.cc/pdjJT1vs/image.png",
             iconSize: [45, 45],
@@ -933,7 +871,37 @@
           });
 
           const marker = L.marker([lat, lon], { icon: busStopIcon })
-            .bindPopup(html);
+            .bindPopup(() => {
+              const etas = busETAData.get(st.StationUID) || [];
+              let etaHtml = "";
+
+              if (etas.length > 0) {
+                etaHtml = "<br/><b>到站預估：</b><br/>" + etas.slice(0, 5).map(e => {
+                  if (e.EstimateTime > 0) {
+                    const min = Math.round(e.EstimateTime / 60);
+                    return `${e.RouteName.Zh_tw} → ${min} 分鐘`;
+                  } else {
+                    // 判斷 StopStatus
+                    let statusText = "";
+                    switch (e.StopStatus) {
+                      case 0:
+                      case 1: statusText = "尚未發車"; break;
+                      case 2: statusText = "交管不停靠"; break;
+                      case 3: statusText = "今日未營運"; break;
+                      case 4: statusText = "末班車已過"; break;
+                      default: statusText = "暫無資訊";
+                    }
+                    return `${e.RouteName.Zh_tw} → ${statusText}`;
+                  }
+                }).join("<br/>");
+              } else {
+                etaHtml = "<br/>暫無到站資訊";
+              }
+
+              return `<b>${stationName}</b>${etaHtml}`;
+            });
+
+
           busStopCluster.addLayer(marker);
           addZoomOnClick(marker, lat, lon);
         });
@@ -944,15 +912,47 @@
       }
     }
 
-    // (3) 公車動態
+
+    // (3) 公車 ETA
+    async function loadBusETAs() {
+      const token = await getToken(2);
+      if (!token) return;
+
+      const url = "https://tdx.transportdata.tw/api/basic/v3/Bus/EstimatedTimeOfArrival/City/Tainan?$format=JSON";
+      try {
+        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+        const etas = res.data?.N1Datas || [];
+        console.log("✅ 公車 ETA 筆數：", etas.length);
+
+        busETAData.clear();
+        etas.forEach(e => {
+          if (!e.StopUID) return;
+          if (!busETAData.has(e.StopUID)) busETAData.set(e.StopUID, []);
+          busETAData.get(e.StopUID).push(e);
+        });
+
+        // 每 60 秒更新
+        setTimeout(loadBusETAs, 60000);
+
+      } catch (err) {
+        console.error("❌ 公車 ETA 讀取失敗", err);
+        setTimeout(loadBusETAs, 120000);
+      }
+    }
+
+    // (4) 公車動態
     const busRealtimeLayer = L.layerGroup();
+
     async function loadBusRealtime() {
       const token = await getToken(2);
       if (!token) return;
+
       const url = "https://tdx.transportdata.tw/api/basic/v2/Bus/RealTimeByFrequency/City/Tainan?$format=JSON";
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
         busRealtimeLayer.clearLayers();
+
         const buses = res.data || [];
         console.log("🚌 公車動態數量：", buses.length);
 
@@ -970,8 +970,8 @@
           const busIcon = L.divIcon({
             className: "bus-icon",
             html: `<div style="transform: rotate(${azimuth}deg);">
-          <img src="https://i.postimg.cc/PrjpdnM6/image.png" style="width:35px;height:35px;"/>
-        </div>`,
+                 <img src="https://i.postimg.cc/PrjpdnM6/image.png" style="width:35px;height:35px;"/>
+               </div>`,
             iconSize: [5, 5],
             iconAnchor: [17, 17],
             popupAnchor: [0, -17]
@@ -986,62 +986,24 @@
       `;
 
           const marker = L.marker([lat, lon], { icon: busIcon })
-            .bindPopup(html)
-            .addTo(busRealtimeLayer);
+            .bindPopup(html);
+
+          busRealtimeLayer.addLayer(marker);
           addZoomOnClick(marker, lat, lon);
         });
 
         setTimeout(loadBusRealtime, 30000);
+
       } catch (err) {
         console.error("❌ 公車動態讀取失敗", err);
         setTimeout(loadBusRealtime, 60000);
       }
     }
 
-    // (4) ETA 更新
-    async function loadBusETAs() {
-      const token = await getToken(2);
-      if (!token) return;
-
-      const url = "https://tdx.transportdata.tw/api/basic/v3/Bus/EstimatedTimeOfArrival/City/Tainan?$format=JSON";
-      try {
-        const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
-
-        // ⚡ 這裡修正：資料包在 BusEstimatedTimeOfArrival
-        const etas = res.data?.BusEstimatedTimeOfArrival || [];
-        arrivalMap.clear();
-
-        etas.forEach(e => {
-          if (!e.StopUID) return;
-          if (!arrivalMap.has(e.StopUID)) arrivalMap.set(e.StopUID, []);
-          arrivalMap.get(e.StopUID).push(e);
-        });
-
-        // Debug log
-        console.log("✅ 公車 ETA 抓到筆數：", etas.length);
-        if (etas.length > 0) {
-          console.log("範例 ETA：", etas[0]);
-        }
-        const someKey = Array.from(arrivalMap.keys())[0];
-        if (someKey) {
-          console.log("範例 StopUID：", someKey, "對應 ETA 筆數：", arrivalMap.get(someKey).length);
-        }
-
-        // 更新完 ETA → 重繪站位 popup
-        await loadBusStations();
-
-        setTimeout(loadBusETAs, 60000);
-      } catch (err) {
-        console.error("❌ 公車 ETA 讀取失敗", err);
-        setTimeout(loadBusETAs, 120000);
-      }
-    }
-
-
-    // (5) 總圖層
+    // (5) 公車資訊總圖層
     const busInfoLayer = L.layerGroup([busRouteLayer, busStopLayer, busRealtimeLayer]);
 
-    // (6) 圖例
+    // (6) 公車圖例
     const busLegend = L.control({ position: 'bottomright' });
     busLegend.onAdd = function () {
       const div = L.DomUtil.create('div', 'legend');
@@ -1053,15 +1015,17 @@
   `;
       return div;
     };
-
-    map.on("overlayadd", e => {
+    map.on("overlayadd", function (e) {
       if (e.name === "公車資訊") busLegend.addTo(map);
     });
-    map.on("overlayremove", e => {
+    map.on("overlayremove", function (e) {
       if (e.name === "公車資訊") map.removeControl(busLegend);
     });
 
+
     // #endregion
+
+
 
 
 
@@ -1484,20 +1448,16 @@
     updateYoubikeAvailability();
     // 公車
     async function initBus() {
-      await loadBusRoutesMeta();  // 先建路線名稱表
-      await loadBusRoutes();      // 公車路網
-      await loadBusStations();    // 公車站牌
-      loadBusRealtime();          // 公車即時動態（30s 更新）
-      loadBusETAs();              // 公車 ETA（60s 更新）
+      await loadBusRoutes();
+      await loadBusStations();
+      await loadBusETAs();
+      await loadBusRealtime();
     }
 
     // 啟動
     initBus();
 
 
-    //loadBusRoutes();
-    // loadBusStations();
-    //loadBusRealtime();
     // 停車位
     loadOffStreetParking();
     loadOnStreetParking();
