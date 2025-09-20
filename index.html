@@ -683,11 +683,6 @@
         const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
         targetLayer.clearLayers();
 
-        if (!shouldUpdate("cms", resLive.data?.UpdateTime)) {
-          setTimeout(loadEvents, 600000);
-          return;
-        }
-
         const events = data?.LiveEvents || [];
         events.forEach(ev => {
           const latlng = parseWKTPoint(ev.Positions);
