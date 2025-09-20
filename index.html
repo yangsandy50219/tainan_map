@@ -343,7 +343,7 @@
       var div = L.DomUtil.create('div', 'info-control');
       div.innerHTML = '<img src="https://i.postimg.cc/7hvYvwPL/home.png" alt="回到台南市" style="width:24px;height:24px;">';
       div.title = "回到台南市中心";
-      
+
       // 外框樣式
       div.style.backgroundColor = 'rgba(0,170,170,0.5)';
       div.style.padding = '6px';
@@ -454,6 +454,21 @@
       .catch(err => console.error("❌ 載入區界失敗", err));
     // #endregion
 
+    // #region ////// 判斷需不需更新 ///////
+    // 用來記錄各圖層最後更新時間
+    const lastUpdate = {};
+
+    // 通用判斷工具
+    function shouldUpdate(layerKey, newTime) {
+      if (!newTime) return true; // 沒時間 → 照樣更新
+      if (lastUpdate[layerKey] === newTime) {
+        console.log(`⚠️ ${layerKey} 資料無變化，跳過更新`);
+        return false;
+      }
+      lastUpdate[layerKey] = newTime;
+      return true;
+    }
+    // #endregion
 
     // #region///////// CCTV /////////////////
     // CCTV 圖層（預設都不加到地圖）
@@ -505,13 +520,21 @@
       axios.get("https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/City/Tainan?$format=JSON", {
         headers: { Authorization: `Bearer ${token}` }
       }).then(res => {
+
+        if (!shouldUpdate("cctv", res.data?.UpdateTime)) {
+          setTimeout(getCCTVData, 300000);
+          return;
+        }
+
         (res.data.CCTVs || []).forEach(c => {
           const marker = L.marker([c.PositionLat, c.PositionLon], { icon: cctvIcon })
             .bindPopup(createCCTVPopup(c.RoadName, c.VideoStreamURL), { maxWidth: "640", maxHeight: "480" })
             .addTo(cityCCTVLayer);
           addZoomOnClickCCTV(marker, c.PositionLat, c.PositionLon);
         });
+        setTimeout(getCCTVData, 300000);
       }).catch(err => console.error("❌ 市區 CCTV 讀取失敗", err));
+      setTimeout(getCCTVData, 300000);
     }
 
     // 高速公路 CCTV //
@@ -534,8 +557,10 @@
               .addTo(highwayCCTVLayer);
             addZoomOnClickCCTV(marker, c.PositionLat, c.PositionLon);
           });
+          setTimeout(getCCTVData1, 300000);
         })
         .catch(err => console.error("❌ 高速公路 CCTV 讀取失敗", err));
+      setTimeout(getCCTVData1, 300000);
     }
 
     // 省道 CCTV //
@@ -657,6 +682,11 @@
       try {
         const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
         targetLayer.clearLayers();
+
+        if (!shouldUpdate("cms", resLive.data?.UpdateTime)) {
+          setTimeout(loadEvents, 600000);
+          return;
+        }
 
         const events = data?.LiveEvents || [];
         events.forEach(ev => {
@@ -787,6 +817,12 @@
 
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
+        if (!shouldUpdate("youbike", res.data?.UpdateTime)) {
+          setTimeout(updateYoubikeAvailability, 300000);
+          return;
+        }
+
         const stations = res.data || [];
         console.log("🚲 YouBike 站點數量：", stations.length);
 
@@ -983,9 +1019,11 @@
           addZoomOnClick(marker, lat, lon);
         });
 
+
         console.log("✅ 公車站位載入完成");
       } catch (err) {
         console.error("❌ 公車站位讀取失敗", err);
+
       }
     }
 
@@ -999,6 +1037,11 @@
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
         const etas = res.data?.N1Datas || [];
+
+        if (!shouldUpdate("busETA", res.data?.UpdateTime)) {
+          setTimeout(loadBusETAs, 120000);
+          return;
+        }
         console.log("✅ 公車 ETA 筆數：", etas.length);
 
         busETAData.clear();
@@ -1027,6 +1070,12 @@
       const url = "https://tdx.transportdata.tw/api/basic/v2/Bus/RealTimeByFrequency/City/Tainan?$format=JSON";
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
+        // ✅ 判斷是否需要更新
+        if (!shouldUpdate("busRealtime", res.data?.[0]?.GPSTime)) {
+          setTimeout(loadBusRealtime, 120000);
+          return;
+        }
 
         busRealtimeLayer.clearLayers();
 
@@ -1069,11 +1118,11 @@
           addZoomOnClick(marker, lat, lon);
         });
 
-        setTimeout(loadBusRealtime, 60000);
+        setTimeout(loadBusRealtime, 120000);
 
       } catch (err) {
         console.error("❌ 公車動態讀取失敗", err);
-        setTimeout(loadBusRealtime, 60000);
+        setTimeout(loadBusRealtime, 120000);
       }
     }
 
@@ -1136,6 +1185,11 @@
           axios.get(urlAvail, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
 
+        if (!shouldUpdate("offStreet", resAvail.data?.UpdateTime)) {
+          setTimeout(loadOffStreetParking, 300000); // 3 分鐘後再跑
+          return;
+        }
+
         const base = resBase.data?.CarParks || [];
         const avail = resAvail.data?.ParkingAvailabilities || [];
 
@@ -1176,8 +1230,10 @@
         });
 
         console.log("✅ 場內停車場載入完成");
+        setTimeout(loadOffStreetParking, 300000);
       } catch (err) {
         console.error("❌ 場內停車場讀取失敗", err);
+        setTimeout(loadOffStreetParking, 300000);
       }
     }
 
@@ -1197,6 +1253,12 @@
           axios.get(urlSpace, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(urlAvail, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
+
+        if (!shouldUpdate("onStreet", resAvail.data?.UpdateTime)) {
+          setTimeout(loadOnStreetParking, 300000);
+          return;
+        }
+
 
         const base = resBase.data?.ParkingSegments || [];
         // 有些資料欄位是 Crub… 有些是 Curb… 兩個都容錯處理
@@ -1241,8 +1303,10 @@
         });
 
         console.log("✅ 路邊停車載入完成");
+        setTimeout(loadOnStreetParking, 300000);
       } catch (err) {
         console.error("❌ 路邊停車位讀取失敗", err);
+        setTimeout(loadOnStreetParking, 300000);
       }
     }
 
