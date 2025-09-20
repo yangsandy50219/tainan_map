@@ -171,6 +171,31 @@
       border-bottom: 1px solid #ccc;
       cursor: pointer;
     }
+
+    /*重整*/
+    #refresh-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 2000;
+      /* 保證在地圖上方 */
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 8px;
+      padding: 6px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+      transition: background 0.2s ease;
+    }
+
+    #refresh-btn:hover {
+      background: rgba(255, 255, 255, 1);
+    }
+
+    #refresh-btn img {
+      width: 28px;
+      height: 28px;
+      display: block;
+    }
   </style>
 </head>
 
@@ -193,6 +218,11 @@
 
   <!-- ✅ 地圖 -->
   <div id="map"></div>
+
+  <!-- 重整 -->
+  <div id="refresh-btn" title="重新整理頁面，請勿在短時間內連續重整，會發生錯誤">
+    <img src="https://i.postimg.cc/L4nrq14n/refresh.png" alt="重新整理" />
+  </div>
 
   <script>
     // #region token&API
@@ -312,7 +342,8 @@
     infoControl.onAdd = function (map) {
       var div = L.DomUtil.create('div', 'info-control');
       div.innerHTML = '<img src="https://i.postimg.cc/7hvYvwPL/home.png" alt="回到台南市" style="width:24px;height:24px;">';
-
+      div.title = "回到台南市中心";
+      
       // 外框樣式
       div.style.backgroundColor = 'rgba(0,170,170,0.5)';
       div.style.padding = '6px';
@@ -1288,18 +1319,22 @@
       }));
     }
 
-    // 模糊搜尋（名稱/地址皆可）
+    // 搜尋功能 (支援中文模糊比對，不使用 toLowerCase)
     function searchParking(keyword) {
-      const k = keyword.trim().toLowerCase();
+      const k = keyword.trim();
       if (!k) return [];
+
       const f = (p) =>
-        (p.name && p.name.toLowerCase().includes(k)) ||
-        (p.address && p.address.toLowerCase().includes(k));
+        (p.name && p.name.includes(k)) ||
+        (p.address && p.address.includes(k));
+
       const r1 = offStreetData.filter(f);
       const r2 = onStreetData.filter(f);
+
       console.log("搜尋關鍵字:", k, "場內筆數:", r1.length, "路邊筆數:", r2.length);
       return [...r1, ...r2];
     }
+
 
     // 用 createElement + appendChild（❌ 不要再混用 innerHTML += 破壞事件綁定）
     function showResults(results) {
@@ -1560,6 +1595,12 @@
     }
     // #endregion
 
+    // #region //////// 重整 ///////////
+    document.getElementById("refresh-btn").addEventListener("click", () => {
+      // 重新整理頁面
+      location.reload();
+    });
+    // #endregion
 
 
     // #region/////////圖層控制器//////////////
