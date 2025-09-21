@@ -520,7 +520,7 @@
       }).then(res => {
 
         if (!shouldUpdate("cctv", res.data?.UpdateTime)) {
-          setTimeout(getCCTVData, 300000);
+          setTimeout(getCCTVData, 480000);
           return;
         }
 
@@ -530,9 +530,9 @@
             .addTo(cityCCTVLayer);
           addZoomOnClickCCTV(marker, c.PositionLat, c.PositionLon);
         });
-        setTimeout(getCCTVData, 300000);
+        setTimeout(getCCTVData, 480000);
       }).catch(err => console.error("❌ 市區 CCTV 讀取失敗", err));
-      setTimeout(getCCTVData, 300000);
+      setTimeout(getCCTVData, 480000);
     }
 
     // 高速公路 CCTV //
@@ -555,10 +555,10 @@
               .addTo(highwayCCTVLayer);
             addZoomOnClickCCTV(marker, c.PositionLat, c.PositionLon);
           });
-          setTimeout(getCCTVData1, 300000);
+          setTimeout(getCCTVData1, 480000);
         })
         .catch(err => console.error("❌ 高速公路 CCTV 讀取失敗", err));
-      setTimeout(getCCTVData1, 300000);
+      setTimeout(getCCTVData1, 480000);
     }
 
     // 省道 CCTV //
@@ -710,7 +710,7 @@
 
       } catch (err) {
         console.error("❌ 道路事件讀取失敗", url, err);
-        setTimeout(() => loadEvents(url, targetLayer), 600000); //十分鐘更新
+        setTimeout(() => loadEvents(url, targetLayer), 900000); //十分鐘更新
       }
     }
 
@@ -812,7 +812,7 @@
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
 
         if (!shouldUpdate("youbike", res.data?.UpdateTime)) {
-          setTimeout(updateYoubikeAvailability, 300000);
+          setTimeout(updateYoubikeAvailability, 600000);
           return;
         }
 
@@ -868,11 +868,11 @@
         });
 
         // 每 300 秒更新一次
-        setTimeout(updateYoubikeAvailability, 300000);
+        setTimeout(updateYoubikeAvailability, 600000);
 
       } catch (err) {
         console.error("❌ YouBike 車位更新失敗", err);
-        setTimeout(updateYoubikeAvailability, 300000);
+        setTimeout(updateYoubikeAvailability, 600000);
       }
     }
 
@@ -1179,7 +1179,7 @@
         ]);
 
         if (!shouldUpdate("offStreet", resAvail.data?.UpdateTime)) {
-          setTimeout(loadOffStreetParking, 300000); // 3 分鐘後再跑
+          setTimeout(loadOffStreetParking, 480000); 
           return;
         }
 
@@ -1223,10 +1223,10 @@
         });
 
         console.log("✅ 場內停車場載入完成");
-        setTimeout(loadOffStreetParking, 300000);
+        setTimeout(loadOffStreetParking, 480000);
       } catch (err) {
         console.error("❌ 場內停車場讀取失敗", err);
-        setTimeout(loadOffStreetParking, 300000);
+        setTimeout(loadOffStreetParking, 480000);
       }
     }
 
@@ -1248,7 +1248,7 @@
         ]);
 
         if (!shouldUpdate("onStreet", resAvail.data?.UpdateTime)) {
-          setTimeout(loadOnStreetParking, 300000);
+          setTimeout(loadOnStreetParking, 480000);
           return;
         }
 
@@ -1296,10 +1296,10 @@
         });
 
         console.log("✅ 路邊停車載入完成");
-        setTimeout(loadOnStreetParking, 300000);
+        setTimeout(loadOnStreetParking, 480000);
       } catch (err) {
         console.error("❌ 路邊停車位讀取失敗", err);
-        setTimeout(loadOnStreetParking, 300000);
+        setTimeout(loadOnStreetParking, 480000);
       }
     }
 
@@ -1568,7 +1568,7 @@
       const token = await getToken(3);
       if (!token) return;
 
-      const url = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CMS/Highway?$format=JSON";
+      const url = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CMS/City/Tainan?%24format=JSON";
 
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -1624,7 +1624,7 @@
       const token = await getToken(3);
       if (!token) return;
 
-      const url = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/CMS/Highway?$format=JSON";
+      const url = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/Live/CMS/City/Tainan?%24format=JSON";
 
       try {
         const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -1641,7 +1641,7 @@
         setTimeout(loadCMSLive, 600000);
       } catch (err) {
         console.error("❌ CMS 即時資訊讀取失敗", err);
-        setTimeout(loadCMSLive, 120000);
+        setTimeout(loadCMSLive, 600000);
       }
     }
 
