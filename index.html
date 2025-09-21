@@ -1693,9 +1693,9 @@
     const eventControl = L.control.layers(null,
       {
         "CCTV": allCCTV,
-        "即時道路事件": allEventsLayer,
         "停車資訊": allParkingLayer,
-        "CMS 標誌": cmsLayer,
+        "即時道路事件": allEventsLayer,
+        "CMS資訊": cmsLayer,
         "即時路況": trafficLayer
       }, { position: 'topleft', collapsed: true });
     eventControl.addTo(map);
