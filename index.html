@@ -363,8 +363,6 @@
     infoControl.addTo(map);
     // #endregion
 
-
-
     // #region //////共用函式：點自動縮放/////////
     // 通用：點擊後縮放並自動判斷是否往上偏移
     function addZoomOnClick(marker, lat, lon, zoom = 16) {
@@ -1034,7 +1032,7 @@
         const etas = res.data?.N1Datas || [];
 
         if (!shouldUpdate("busETA", res.data?.UpdateTime)) {
-          setTimeout(loadBusETAs, 120000);
+          setTimeout(loadBusETAs, 600000);
           return;
         }
         console.log("✅ 公車 ETA 筆數：", etas.length);
@@ -1047,11 +1045,11 @@
         });
 
         // 每 120 秒更新
-        setTimeout(loadBusETAs, 120000);
+        setTimeout(loadBusETAs, 600000);
 
       } catch (err) {
         console.error("❌ 公車 ETA 讀取失敗", err);
-        setTimeout(loadBusETAs, 120000);
+        setTimeout(loadBusETAs, 600000);
       }
     }
 
@@ -1068,7 +1066,7 @@
 
         // ✅ 判斷是否需要更新
         if (!shouldUpdate("busRealtime", res.data?.[0]?.GPSTime)) {
-          setTimeout(loadBusRealtime, 120000);
+          setTimeout(loadBusRealtime, 600000);
           return;
         }
 
@@ -1113,11 +1111,11 @@
           addZoomOnClick(marker, lat, lon);
         });
 
-        setTimeout(loadBusRealtime, 120000);
+        setTimeout(loadBusRealtime, 600000);
 
       } catch (err) {
         console.error("❌ 公車動態讀取失敗", err);
-        setTimeout(loadBusRealtime, 120000);
+        setTimeout(loadBusRealtime, 600000);
       }
     }
 
