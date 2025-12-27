@@ -196,6 +196,79 @@
       height: 28px;
       display: block;
     }
+
+    /* ===== 右側即時事件欄 ===== */
+    :root {
+      --ticker-w: 320px;
+    }
+
+    #search-panel,
+    #map {
+      width: calc(100% - var(--ticker-w));
+    }
+
+    /* 右側欄位 */
+    #event-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: var(--ticker-w);
+      height: 100%;
+      background: rgba(255, 255, 255, 0.95);
+      border-left: 1px solid #ddd;
+      z-index: 2500;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 標題 */
+    #event-panel .header {
+      padding: 10px 12px;
+      font-weight: bold;
+      border-bottom: 1px solid #e0e0e0;
+      background: #f7f7f7;
+    }
+
+    /* 事件清單（會捲動的） */
+    #event-list {
+      flex: 1;
+      overflow-y: hidden;
+      /* ❗我們自己控制捲動 */
+      padding: 10px;
+    }
+
+    /* 單筆事件 */
+    .event-item {
+      font-size: 13px;
+      line-height: 1.4;
+      padding: 8px;
+      margin-bottom: 8px;
+      border-left: 4px solid #3b82f6;
+      background: #f9f9f9;
+    }
+
+    .event-title {
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .event-time {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .event-item {
+      cursor: pointer;
+      /* ✅ 變小手 */
+      user-select: none;
+      /* 可選：避免一直反白 */
+    }
+
+    .event-item:hover {
+      background: #eef6ff;
+      /* 可選：滑過去有提示感 */
+    }
   </style>
 </head>
 
@@ -224,7 +297,16 @@
     <img src="https://i.postimg.cc/L4nrq14n/refresh.png" alt="重新整理" />
   </div>
 
+  <!-- 右側即時道路事件 -->
+  <div id="event-panel">
+    <div class="header">即時道路事件</div>
+    <div id="event-list"></div>
+  </div>
+
+
   <script>
+    // 宣告一個全域的事件對照表
+    const eventMarkerMap = new Map();
     // #region token&API
     //////////// ArcGIS API KEY ///////////
     const arcgis_apiKey = "AAPTxy8BH1VEsoebNVZXo8HurG35MoS3OvUYxFcNeS2m5JxU1AR5TGUGDBXLI8BTgkxZ8XFImL07ZrGjzL88WXWEeWRV8XgMpTRASIkKUh0ATXQcRJOdOlXp6pGgL1lW_A12BvA801o1IIFBe3DJnCBgWnqcjShpc8t_b3Nc2o75ulf6Di9mM2btfpa_fZkHZi3362RlCmTwfSMmk_mZT6jTEwVBJqm1EBVk4O9pS9-p8xE.AT1_7VueP0OE";
@@ -286,7 +368,6 @@
       }
     }
     // #endregion
-
 
     // #region 初始化地圖，預設顯示整個台南市
     // 台南市範圍 (左上 & 右下座標)
@@ -615,6 +696,58 @@
 
 
     // #region////// 即時道路事件 /////////////
+    // 跑馬燈
+    const eventListEl = document.getElementById("event-list");
+    let autoScrollTimer = null;
+
+    function addEventToPanel(ev, marker) {
+      const item = document.createElement("div");
+      item.className = "event-item";
+
+      item.onclick = () => {
+        // ① 打開即時道路事件圖層（總圖層）
+        if (!map.hasLayer(allEventsLayer)) {
+          map.addLayer(allEventsLayer);
+        }
+
+        // ② 地圖飛到事件位置
+        const latLng = marker.getLatLng();
+        map.flyTo(latLng, 17, { duration: 0.8 });
+
+        // ③ 打開 popup
+        marker.openPopup();
+      };
+
+      const title = ev.EventTitle || "道路事件";
+      const desc = ev.Description || "";
+      const loc = ev?.Location?.Other || "";
+      const time = ev.LastUpdateTime || ev.PublishTime || "";
+
+      item.innerHTML = `
+    <div class="event-title">📍 ${title}</div>
+    <div>${loc ? `地點：${loc}<br>` : ""}${desc}</div>
+    <div class="event-time">${time ? new Date(time).toLocaleString() : ""}</div>
+  `;
+
+      eventListEl.appendChild(item);
+    }
+
+    function startAutoScroll() {
+      if (autoScrollTimer) return;
+
+      autoScrollTimer = setInterval(() => {
+        eventListEl.scrollTop += 1;
+
+        // 滾到底就回到最上面（無限循環）
+        if (
+          eventListEl.scrollTop + eventListEl.clientHeight >=
+          eventListEl.scrollHeight
+        ) {
+          eventListEl.scrollTop = 0;
+        }
+      }, 40); // 數字越小，滾越快
+    }
+
     // 建立三個子圖層
     const cityEventsLayer = L.layerGroup();
     const freewayEventsLayer = L.layerGroup();
@@ -682,26 +815,34 @@
         targetLayer.clearLayers();
 
         const events = data?.LiveEvents || [];
+        startAutoScroll();
+
         events.forEach(ev => {
           const latlng = parseWKTPoint(ev.Positions);
           if (!latlng) return;
           if (!isInTainan(latlng[0], latlng[1])) return; // 限制台南範圍
 
           const popupHtml = `
-        <div style="min-width:220px">
-          <div style="font-weight:700;margin-bottom:4px">${ev.EventTitle || "道路事件"}</div>
-          ${ev.Description ? `<div>內容：${ev.Description}</div>` : ""}
-          ${ev?.Location?.Other ? `<div>地點：${ev.Location.Other}</div>` : ""}
-          ${ev.Source ? `<div>來源：${ev.Source}</div>` : ""}
-          ${ev.PublishTime ? `<div style="color:#666;font-size:12px">發布時間：${fmtTime(ev.PublishTime)}</div>` : ""}
-          ${ev.LastUpdateTime ? `<div style="color:#666;font-size:12px">更新時間：${fmtTime(ev.LastUpdateTime)}</div>` : ""}
+    <div style="min-width:220px">
+      <div style="font-weight:700;margin-bottom:4px">${ev.EventTitle || "道路事件"}</div>
+      ${ev.Description ? `<div>內容：${ev.Description}</div>` : ""}
+      ${ev?.Location?.Other ? `<div>地點：${ev.Location.Other}</div>` : ""}
+      ${ev.Source ? `<div>來源：${ev.Source}</div>` : ""}
+      ${ev.PublishTime ? `<div style="color:#666;font-size:12px">發布時間：${fmtTime(ev.PublishTime)}</div>` : ""}
+      ${ev.LastUpdateTime ? `<div style="color:#666;font-size:12px">更新時間：${fmtTime(ev.LastUpdateTime)}</div>` : ""}
+    </div>
+  `;
 
-        </div>
-      `;
           const marker = L.marker(latlng, { icon: getEventIcon(ev.Description) })
             .bindPopup(popupHtml)
             .addTo(targetLayer);
+
+          const eventKey = ev.EventID;
+          eventMarkerMap.set(eventKey, marker);
           addZoomOnClick(marker, latlng[0], latlng[1]);
+
+          // ✅ 只有 marker 建立成功才加入右側清單（直接把 marker 傳進去）
+          addEventToPanel(ev, marker);
         });
 
         // 設定自動刷新
@@ -716,6 +857,8 @@
 
     // 啟動三個來源
     function loadAllEvents() {
+      eventListEl.innerHTML = "";      // ✅ 清空右側清單
+      eventMarkerMap.clear();          // ✅ 清空對照表（可留可不留，建議留）
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/City/Tainan?$format=JSON", cityEventsLayer);
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Freeway?$format=JSON", freewayEventsLayer);
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Highway?$format=JSON", highwayEventsLayer);
