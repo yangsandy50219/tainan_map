@@ -229,6 +229,14 @@
       background: #f7f7f7;
     }
 
+    #event-count {
+      font-size: 20px;
+      font-weight: 700;
+      color: #d32f2f;
+      /* 可選：事故數量用紅色 */
+    }
+
+
     /* 事件清單（會捲動的） */
     #event-list {
       flex: 1;
@@ -299,14 +307,17 @@
 
   <!-- 右側即時道路事件 -->
   <div id="event-panel">
-    <div class="header">即時道路事件</div>
+    <div class="header">
+      目前即時道路事件：<span id="event-count">0</span>
+    </div>
     <div id="event-list"></div>
   </div>
-
 
   <script>
     // 宣告一個全域的事件對照表
     const eventMarkerMap = new Map();
+    let eventCount = 0;
+
     // #region token&API
     //////////// ArcGIS API KEY ///////////
     const arcgis_apiKey = "AAPTxy8BH1VEsoebNVZXo8HurG35MoS3OvUYxFcNeS2m5JxU1AR5TGUGDBXLI8BTgkxZ8XFImL07ZrGjzL88WXWEeWRV8XgMpTRASIkKUh0ATXQcRJOdOlXp6pGgL1lW_A12BvA801o1IIFBe3DJnCBgWnqcjShpc8t_b3Nc2o75ulf6Di9mM2btfpa_fZkHZi3362RlCmTwfSMmk_mZT6jTEwVBJqm1EBVk4O9pS9-p8xE.AT1_7VueP0OE";
@@ -700,6 +711,13 @@
     const eventListEl = document.getElementById("event-list");
     let autoScrollTimer = null;
 
+    function updateEventCount() {
+      const countEl = document.getElementById("event-count");
+      if (!countEl) return;
+      countEl.textContent = `${eventCount} 件`;
+    }
+
+
     function addEventToPanel(ev, marker) {
       const item = document.createElement("div");
       item.className = "event-item";
@@ -730,6 +748,9 @@
   `;
 
       eventListEl.appendChild(item);
+      updateEventCount(); // ✅ 每新增一筆就更新數量
+      eventCount++;
+      updateEventCount(); // ✅ 清空後立刻顯示（0）
     }
 
     function startAutoScroll() {
@@ -859,6 +880,9 @@
     function loadAllEvents() {
       eventListEl.innerHTML = "";      // ✅ 清空右側清單
       eventMarkerMap.clear();          // ✅ 清空對照表（可留可不留，建議留）
+      eventCount = 0;
+      updateEventCount();
+
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/City/Tainan?$format=JSON", cityEventsLayer);
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Freeway?$format=JSON", freewayEventsLayer);
       loadEvents("https://tdx.transportdata.tw/api/basic/v1/Traffic/RoadEvent/LiveEvent/Highway?$format=JSON", highwayEventsLayer);
@@ -1908,7 +1932,7 @@
 
     // 即時資訊(延遲&定時更新)
     setTimeout(updateYoubikeAvailability, 10000); // YouBike → 10 秒後開始
-    setTimeout(loadAllEvents, 20000);     // 道路事件 → 20 秒後開始
+    //setTimeout(loadAllEvents, 20000);     // 道路事件 → 20 秒後開始
 
 
 
