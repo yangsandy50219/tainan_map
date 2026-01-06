@@ -723,17 +723,23 @@
       item.className = "event-item";
 
       item.onclick = () => {
-        // ① 打開即時道路事件圖層（總圖層）
+        // ① 確保事件圖層已打開
         if (!map.hasLayer(allEventsLayer)) {
           map.addLayer(allEventsLayer);
         }
 
         // ② 地圖飛到事件位置
         const latLng = marker.getLatLng();
-        map.flyTo(latLng, 17, { duration: 0.8 });
 
-        // ③ 打開 popup
-        marker.openPopup();
+        // ③ 等地圖移動完成後再開 popup（最穩）
+        map.once("moveend", () => {
+          marker.openPopup();
+
+          // （可選）如果 popup 太靠上被切到，可再微調
+          // setTimeout(() => map.panBy([0, -120]), 150);
+        });
+
+        map.flyTo(latLng, 17, { duration: 0.8 });
       };
 
       const title = ev.EventTitle || "道路事件";
